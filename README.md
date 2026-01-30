@@ -3,6 +3,7 @@ Its Just a Simple To Do List Application built with AI. Users Can Add Goals and 
 
 <img width="850" height="850" alt="Screenshot From 2026-01-30 21-42-19" src="https://github.com/user-attachments/assets/e7c3cefa-a4dd-4fd2-a645-338a082e3f89" />
 
+<img width="850" height="850" alt="Screenshot From 2026-01-30 21-55-31" src="https://github.com/user-attachments/assets/3a57a771-4ab8-4dbe-9024-f11820eb248d" />
 
 
 You can install this application by just cloning and running the ./install.sh command
