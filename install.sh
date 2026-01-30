@@ -16,15 +16,20 @@ mkdir -p "$ICON_DIR"
 
 # Copy source files
 echo "Copying application files..."
-cp main.py window.py goal_row.py storage.py edit_dialog.py summary_widget.py "$INSTALL_DIR/"
+cp main.py window.py goal_row.py storage.py edit_dialog.py summary_widget.py notification_manager.py "$INSTALL_DIR/"
 
 # Copy icon
 echo "Installing icon..."
 cp icon.png "$ICON_DIR/goal-up.png"
+cp icon.png "$INSTALL_DIR/icon.png" # Fallback for local search path
 
 # Copy desktop file
 echo "Installing desktop entry..."
 cp goal-up.desktop "$APP_DIR/"
+
+# Update desktop database
+echo "Updating desktop database..."
+update-desktop-database "$APP_DIR"
 
 # Create executable wrapper
 echo "Creating executable..."

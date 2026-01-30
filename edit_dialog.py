@@ -5,7 +5,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gtk, GObject
+from gi.repository import Adw, Gtk, GObject, GLib
 from datetime import datetime
 
 
@@ -80,34 +80,75 @@ class EditGoalDialog(Adw.Dialog):
         # End date group (optional)
         date_group = Adw.PreferencesGroup()
         date_group.set_title("End Date (Optional)")
-        date_group.set_description("Format: YYYY-MM-DD (e.g., 2026-02-15)")
         content_box.append(date_group)
 
-        self.date_row = Adw.EntryRow()
+        self.date_row = Adw.ActionRow()
         self.date_row.set_title("End Date")
-        self.date_row.set_text(end_date or "")
+        self.date_row.set_subtitle(end_date or "No date set")
         date_group.add(self.date_row)
 
+        # Date picker button
+        self.pick_date_btn = Gtk.Button()
+        self.pick_date_btn.set_icon_name("calendar-symbolic")
+        self.pick_date_btn.set_valign(Gtk.Align.CENTER)
+        self.pick_date_btn.add_css_class("flat")
+        self.pick_date_btn.connect("clicked", self._on_pick_date_clicked)
+        self.date_row.add_suffix(self.pick_date_btn)
+
         # Clear date button
-        clear_date_btn = Gtk.Button(label="Clear End Date")
+        clear_date_btn = Gtk.Button(label="Clear")
         clear_date_btn.add_css_class("flat")
-        clear_date_btn.connect("clicked", lambda b: self.date_row.set_text(""))
-        date_group.add(clear_date_btn)
+        clear_date_btn.set_valign(Gtk.Align.CENTER)
+        clear_date_btn.connect("clicked", self._on_clear_date_clicked)
+        self.date_row.add_suffix(clear_date_btn)
+
+        self._chosen_date = end_date
+
+    def _on_pick_date_clicked(self, button: Gtk.Button) -> None:
+        """Open a calendar popover."""
+        print("Pick Date clicked")
+        self._popover = Gtk.Popover()
+        self._popover.set_parent(button)
+        self._popover.set_autohide(True)
+        
+        calendar = Gtk.Calendar()
+        # Set existing date if any
+        if self._chosen_date:
+            try:
+                dt = datetime.strptime(self._chosen_date, "%Y-%m-%d")
+                gdt = GLib.DateTime.new_local(dt.year, dt.month, dt.day, 0, 0, 0)
+                calendar.select_day(gdt)
+                print(f"Calendar pre-selected: {self._chosen_date}")
+            except Exception as e:
+                print(f"Error setting calendar date: {e}")
+                
+        calendar.connect("day-selected", self._on_day_selected, self._popover)
+        self._popover.set_child(calendar)
+        self._popover.popup()
+
+    def _on_day_selected(self, calendar: Gtk.Calendar, popover: Gtk.Popover) -> None:
+        """Handle date selection in calendar."""
+        gdt = calendar.get_date()
+        year = gdt.get_year()
+        month = gdt.get_month()
+        day = gdt.get_day_of_month()
+        
+        self._chosen_date = f"{year:04d}-{month:02d}-{day:02d}"
+        print(f"Date selected: {self._chosen_date}")
+        self.date_row.set_subtitle(self._chosen_date)
+        popover.popdown()
+
+    def _on_clear_date_clicked(self, button: Gtk.Button) -> None:
+        """Clear the chosen date."""
+        self._chosen_date = ""
+        self.date_row.set_subtitle("No date set")
 
     def _on_save_clicked(self, button: Gtk.Button) -> None:
         """Handle save button click."""
         title = self.title_row.get_text().strip()
         description = self.desc_row.get_text().strip()
-        end_date = self.date_row.get_text().strip()
+        end_date = self._chosen_date
         
-        # Validate date format if provided
-        if end_date:
-            try:
-                datetime.strptime(end_date, "%Y-%m-%d")
-            except ValueError:
-                end_date = ""  # Invalid format, clear it
-        
-
         if title:
             self.emit("save", title, description, end_date)
             self.close()
@@ -119,15 +160,15 @@ class EditTaskDialog(Adw.Dialog):
     __gtype_name__ = "EditTaskDialog"
 
     __gsignals__ = {
-        "save": (GObject.SignalFlags.RUN_FIRST, None, (str,)),  # text
+        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str)),  # text, end_date
     }
 
-    def __init__(self, text: str = ""):
+    def __init__(self, text: str = "", end_date: str = ""):
         super().__init__()
 
         self.set_title("Edit Task")
         self.set_content_width(400)
-        self.set_content_height(200)
+        self.set_content_height(350)
 
         # Main layout
         toolbar_view = Adw.ToolbarView()
@@ -171,9 +212,76 @@ class EditTaskDialog(Adw.Dialog):
         self.text_row.set_text(text)
         group.add(self.text_row)
 
+        # End date group (optional)
+        date_group = Adw.PreferencesGroup()
+        date_group.set_title("End Date (Optional)")
+        content_box.append(date_group)
+
+        self.date_row = Adw.ActionRow()
+        self.date_row.set_title("End Date")
+        self.date_row.set_subtitle(end_date or "No date set")
+        date_group.add(self.date_row)
+
+        # Date picker button
+        self.pick_date_btn = Gtk.Button()
+        self.pick_date_btn.set_icon_name("calendar-symbolic")
+        self.pick_date_btn.set_valign(Gtk.Align.CENTER)
+        self.pick_date_btn.add_css_class("flat")
+        self.pick_date_btn.connect("clicked", self._on_pick_date_clicked)
+        self.date_row.add_suffix(self.pick_date_btn)
+
+        # Clear button
+        clear_btn = Gtk.Button(label="Clear")
+        clear_btn.add_css_class("flat")
+        clear_btn.set_valign(Gtk.Align.CENTER)
+        clear_btn.connect("clicked", self._on_clear_date_clicked)
+        self.date_row.add_suffix(clear_btn)
+
+        self._chosen_date = end_date
+
+    def _on_pick_date_clicked(self, button: Gtk.Button) -> None:
+        """Open a calendar popover."""
+        print("Task Pick Date clicked")
+        self._popover = Gtk.Popover()
+        self._popover.set_parent(button)
+        self._popover.set_autohide(True)
+        
+        calendar = Gtk.Calendar()
+        if self._chosen_date:
+            try:
+                dt = datetime.strptime(self._chosen_date, "%Y-%m-%d")
+                gdt = GLib.DateTime.new_local(dt.year, dt.month, dt.day, 0, 0, 0)
+                calendar.select_day(gdt)
+                print(f"Task Calendar pre-selected: {self._chosen_date}")
+            except Exception as e:
+                print(f"Error setting task calendar date: {e}")
+                
+        calendar.connect("day-selected", self._on_day_selected, self._popover)
+        self._popover.set_child(calendar)
+        self._popover.popup()
+
+    def _on_day_selected(self, calendar: Gtk.Calendar, popover: Gtk.Popover) -> None:
+        """Handle date selection in calendar."""
+        gdt = calendar.get_date()
+        year = gdt.get_year()
+        month = gdt.get_month()
+        day = gdt.get_day_of_month()
+        
+        self._chosen_date = f"{year:04d}-{month:02d}-{day:02d}"
+        print(f"Task Date selected: {self._chosen_date}")
+        self.date_row.set_subtitle(self._chosen_date)
+        popover.popdown()
+
+    def _on_clear_date_clicked(self, button: Gtk.Button) -> None:
+        """Clear the chosen date."""
+        self._chosen_date = ""
+        self.date_row.set_subtitle("No date set")
+
     def _on_save_clicked(self, button: Gtk.Button) -> None:
         """Handle save button click."""
         text = self.text_row.get_text().strip()
+        end_date = self._chosen_date
+
         if text:
-            self.emit("save", text)
+            self.emit("save", text, end_date)
             self.close()

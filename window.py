@@ -6,12 +6,14 @@ import os
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gtk, Gdk
+from gi.repository import Adw, Gtk, Gdk, Gio
 
 from goal_row import GoalRow
 from edit_dialog import EditGoalDialog
-from storage import load_tasks, save_tasks
+from storage import load_tasks, save_tasks, export_to_ics
 from summary_widget import GoalSummaryWidget
+from notification_manager import NotificationManager
+from datetime import datetime, date
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -21,7 +23,7 @@ class MainWindow(Adw.ApplicationWindow):
         super().__init__(application=app)
 
         self.set_title("Goal UP")
-        self.set_default_size(500, 700)
+        self.set_default_size(800, 800)
         
         # Set icon
         icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
@@ -45,6 +47,13 @@ class MainWindow(Adw.ApplicationWindow):
         # Header bar
         header = Adw.HeaderBar()
         main_box.append(header)
+
+        # Export button
+        self.export_button = Gtk.Button()
+        self.export_button.set_icon_name("document-save-symbolic")
+        self.export_button.set_tooltip_text("Export to Calendar (ICS)")
+        self.export_button.connect("clicked", self._on_export_clicked)
+        header.pack_end(self.export_button)
 
         # Scrolled window for content
         scrolled = Gtk.ScrolledWindow()
@@ -108,6 +117,63 @@ class MainWindow(Adw.ApplicationWindow):
         self._load_goals()
         self._update_empty_state()
         self._update_summary()
+
+        # Initialize notifications
+        self.notification_manager = NotificationManager(app)
+        self._check_and_notify()
+
+    def _check_and_notify(self) -> None:
+        """Check for events due today and notify."""
+        goals = self._get_goals_data()
+        self.notification_manager.check_upcoming_events(goals)
+
+    def _on_export_clicked(self, button: Gtk.Button) -> None:
+        """Handle export button click."""
+        dialog = Gtk.FileDialog(title="Export to Calendar")
+        dialog.set_initial_name("goals.ics")
+        
+        filter_ics = Gtk.FileFilter()
+        filter_ics.set_name("iCalendar files")
+        filter_ics.add_mime_type("text/calendar")
+        filter_ics.add_suffix("ics")
+        
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(filter_ics)
+        dialog.set_filters(filters)
+
+        dialog.save(self, None, self._on_export_file_selected)
+
+    def _on_export_file_selected(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:
+        """Handle file selection for export."""
+        try:
+            file = dialog.save_finish(result)
+            if file:
+                path = file.get_path()
+                goals = self._get_goals_data()
+                if export_to_ics(goals, path):
+                    self.notification_manager.send_notification(
+                        "Export Successful", 
+                        f"Calendar exported to {os.path.basename(path)}"
+                    )
+        except GLib.Error as e:
+            print(f"Export failed: {e.message}")
+
+    def _get_goals_data(self) -> list:
+        """Get all goals and tasks as a list of dictionaries."""
+        goals = []
+        row = self.goal_list.get_first_child()
+        while row is not None:
+            if isinstance(row, GoalRow):
+                goals.append({
+                    "title": row.goal_title,
+                    "description": row.description,
+                    "completed": row.completed,
+                    "tasks": row.get_tasks(),
+                    "created_at": row.created_at,
+                    "end_date": row.end_date
+                })
+            row = row.get_next_sibling()
+        return goals
 
     def _on_add_clicked(self, widget: Gtk.Widget) -> None:
         """Handle add button click or entry activation."""
@@ -187,7 +253,9 @@ class MainWindow(Adw.ApplicationWindow):
         while row is not None:
             if isinstance(row, GoalRow):
                 goals.append({
+                    "title": row.goal_title,
                     "completed": row.completed,
+                    "end_date": row.end_date,
                     "tasks": row.get_tasks()
                 })
             row = row.get_next_sibling()
@@ -201,12 +269,50 @@ class MainWindow(Adw.ApplicationWindow):
         total_tasks = 0
         completed_tasks = 0
         
+        upcoming_events = []
+        today = date.today()
+
         for goal in goals:
             tasks = goal.get("tasks", [])
             total_tasks += len(tasks)
             completed_tasks += sum(1 for t in tasks if t.get("completed", False))
+            
+            # Upcoming Goal
+            if not goal.get("completed", False) and goal.get("end_date"):
+                try:
+                    end_date = datetime.strptime(goal["end_date"], "%Y-%m-%d").date()
+                    days = (end_date - today).days
+                    if days >= 0:
+                        upcoming_events.append({
+                            "type": "goal",
+                            "text": goal["title"],
+                            "days": days,
+                            "color": (0.2, 0.5, 0.8) # Blue
+                        })
+                except (ValueError, TypeError):
+                    pass
+            
+            # Upcoming Tasks
+            for task in tasks:
+                if not task.get("completed", False) and task.get("end_date"):
+                    try:
+                        end_date = datetime.strptime(task["end_date"], "%Y-%m-%d").date()
+                        days = (end_date - today).days
+                        if days >= 0:
+                            upcoming_events.append({
+                                "type": "task",
+                                "text": f"{goal['title']} : {task['text']}",
+                                "days": days,
+                                "color": (0.9, 0.4, 0.2) # Orange
+                            })
+                    except (ValueError, TypeError):
+                        pass
 
-        self.summary_widget.update_status(completed_goals, total_goals, completed_tasks, total_tasks)
+        # Sort by days and take top 4
+        upcoming_events.sort(key=lambda x: x['days'])
+        top_4_events = upcoming_events[:4]
+
+        self.summary_widget.update_status(completed_goals, total_goals, completed_tasks, total_tasks, top_4_events)
 
     def _update_empty_state(self) -> None:
         """Show or hide the empty state message."""

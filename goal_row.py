@@ -23,11 +23,12 @@ class SubTaskRow(Adw.ActionRow):
         "task-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
-    def __init__(self, text: str, completed: bool = False):
+    def __init__(self, text: str, completed: bool = False, end_date: str = ""):
         super().__init__()
 
         self._text = text
         self._completed = completed
+        self._end_date = end_date
 
         self.set_title(text)
 
@@ -38,6 +39,18 @@ class SubTaskRow(Adw.ActionRow):
         self.check_button.connect("toggled", self._on_check_toggled)
         self.add_prefix(self.check_button)
 
+        # Days remaining label (only shown if end_date is set)
+        self.remaining_label = Gtk.Label(label="")
+        self.remaining_label.set_valign(Gtk.Align.CENTER)
+        self.remaining_label.add_css_class("dim-label")
+        self.remaining_label.set_margin_end(8)
+        self.add_suffix(self.remaining_label)
+        self._update_days_remaining()
+
+        # Action buttons box
+        actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self.add_suffix(actions_box)
+
         # Edit button
         edit_button = Gtk.Button()
         edit_button.set_icon_name("document-edit-symbolic")
@@ -45,7 +58,7 @@ class SubTaskRow(Adw.ActionRow):
         edit_button.add_css_class("flat")
         edit_button.add_css_class("circular")
         edit_button.connect("clicked", self._on_edit_clicked)
-        self.add_suffix(edit_button)
+        actions_box.append(edit_button)
 
         # Delete button
         delete_button = Gtk.Button()
@@ -54,7 +67,7 @@ class SubTaskRow(Adw.ActionRow):
         delete_button.add_css_class("flat")
         delete_button.add_css_class("circular")
         delete_button.connect("clicked", self._on_delete_clicked)
-        self.add_suffix(delete_button)
+        actions_box.append(delete_button)
 
         self._update_style()
 
@@ -66,8 +79,15 @@ class SubTaskRow(Adw.ActionRow):
     def completed(self) -> bool:
         return self._completed
 
+    @property
+    def end_date(self) -> str:
+        return self._end_date
+
     def _on_check_toggled(self, button: Gtk.CheckButton) -> None:
         self._completed = button.get_active()
+        if self._completed:
+            self._end_date = date.today().isoformat()
+        self._update_days_remaining()
         self._update_style()
         self.emit("task-toggled", self._completed)
 
@@ -75,15 +95,17 @@ class SubTaskRow(Adw.ActionRow):
         self.emit("task-deleted")
 
     def _on_edit_clicked(self, button: Gtk.Button) -> None:
-        dialog = EditTaskDialog(self._text)
+        dialog = EditTaskDialog(self._text, self._end_date)
         dialog.connect("save", self._on_edit_save)
         # Find the root window to present the dialog
         root = self.get_root()
         if root:
             dialog.present(root)
 
-    def _on_edit_save(self, dialog: EditTaskDialog, text: str) -> None:
+    def _on_edit_save(self, dialog: EditTaskDialog, text: str, end_date: str) -> None:
         self._text = text
+        self._end_date = end_date
+        self._update_days_remaining()
         self._update_style()
         self.emit("task-changed", self._text)
 
@@ -96,6 +118,27 @@ class SubTaskRow(Adw.ActionRow):
             self.remove_css_class("dim-label")
             self.set_title(self._text)
             self.set_use_markup(False)
+
+    def _update_days_remaining(self) -> None:
+        """Update the days remaining label based on end date."""
+        if not self._end_date:
+            self.remaining_label.set_label("")
+            return
+
+        try:
+            end_date = datetime.strptime(self._end_date, "%Y-%m-%d").date()
+            today = date.today()
+            days = (end_date - today).days
+            
+            if days < 0:
+                self.remaining_label.set_label(f"Overdue by {abs(days)}d")
+                self.remaining_label.add_css_class("error")
+            else:
+                self.remaining_label.set_label(f"{days}d left")
+                self.remaining_label.remove_css_class("error")
+                
+        except (ValueError, TypeError):
+            self.remaining_label.set_label("")
 
 
 class GoalRow(Adw.ExpanderRow):
@@ -161,23 +204,7 @@ class GoalRow(Adw.ExpanderRow):
         self.add_suffix(self.remaining_label)
         self._update_days_remaining()
 
-        # Edit button
-        edit_button = Gtk.Button()
-        edit_button.set_icon_name("document-edit-symbolic")
-        edit_button.set_valign(Gtk.Align.CENTER)
-        edit_button.add_css_class("flat")
-        edit_button.add_css_class("circular")
-        edit_button.connect("clicked", self._on_edit_clicked)
-        self.add_suffix(edit_button)
-
-        # Delete button
-        delete_button = Gtk.Button()
-        delete_button.set_icon_name("user-trash-symbolic")
-        delete_button.set_valign(Gtk.Align.CENTER)
-        delete_button.add_css_class("flat")
-        delete_button.add_css_class("circular")
-        delete_button.connect("clicked", self._on_delete_clicked)
-        self.add_suffix(delete_button)
+        self._update_days_remaining()
 
         # Add task entry row
         self._add_task_row = Adw.ActionRow()
@@ -206,10 +233,32 @@ class GoalRow(Adw.ExpanderRow):
 
         # Load existing tasks
         for task in self._tasks:
-            self._add_subtask(task.get("text", ""), task.get("completed", False))
+            self._add_subtask(task.get("text", ""), task.get("completed", False), task.get("end_date", ""))
 
         self._update_style()
         self._update_progress()
+
+        # Action buttons box at the very end
+        actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self.add_suffix(actions_box)
+
+        # Edit button
+        edit_button = Gtk.Button()
+        edit_button.set_icon_name("document-edit-symbolic")
+        edit_button.set_valign(Gtk.Align.CENTER)
+        edit_button.add_css_class("flat")
+        edit_button.add_css_class("circular")
+        edit_button.connect("clicked", self._on_edit_clicked)
+        actions_box.append(edit_button)
+
+        # Delete button
+        delete_button = Gtk.Button()
+        delete_button.set_icon_name("user-trash-symbolic")
+        delete_button.set_valign(Gtk.Align.CENTER)
+        delete_button.add_css_class("flat")
+        delete_button.add_css_class("circular")
+        delete_button.connect("clicked", self._on_delete_clicked)
+        actions_box.append(delete_button)
 
     @property
     def goal_title(self) -> str:
@@ -237,7 +286,8 @@ class GoalRow(Adw.ExpanderRow):
         for row in self._subtask_rows:
             tasks.append({
                 "text": row.task_text,
-                "completed": row.completed
+                "completed": row.completed,
+                "end_date": row.end_date
             })
         return tasks
 
@@ -251,9 +301,9 @@ class GoalRow(Adw.ExpanderRow):
         self._update_days_remaining()
         self.emit("goal-changed")
 
-    def _add_subtask(self, text: str, completed: bool) -> None:
+    def _add_subtask(self, text: str, completed: bool, end_date: str = "") -> None:
         """Add a sub-task row."""
-        row = SubTaskRow(text, completed)
+        row = SubTaskRow(text, completed, end_date)
         row.connect("task-toggled", self._on_subtask_toggled)
         row.connect("task-changed", self._on_subtask_changed)
         row.connect("task-deleted", self._on_subtask_deleted, row)
@@ -289,6 +339,9 @@ class GoalRow(Adw.ExpanderRow):
 
     def _on_check_toggled(self, button: Gtk.CheckButton) -> None:
         self._completed = button.get_active()
+        if self._completed:
+            self._end_date = date.today().isoformat()
+        self._update_days_remaining()
         self._update_style()
         self.emit("goal-changed")
 
