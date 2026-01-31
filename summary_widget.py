@@ -145,7 +145,11 @@ class GoalSummaryWidget(Gtk.DrawingArea):
             # Limit length slightly more aggressively if needed, but 30 should be fine
             if len(text) > 30: text = text[:50] + "..."
             days = event['days']
-            display_text = f"{text} ({days}d left)"
+            if days < 0:
+                display_text = f"{text} (Overdue by {abs(days)}d)"
+            else:
+                display_text = f"{text} ({days}d left)"
+                
             cr.move_to(start_x + 15, current_y)
             cr.show_text(display_text)
             current_y += 20

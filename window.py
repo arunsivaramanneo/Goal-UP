@@ -12,6 +12,7 @@ from goal_row import GoalRow
 from edit_dialog import EditGoalDialog
 from storage import load_tasks, save_tasks, export_to_ics
 from summary_widget import GoalSummaryWidget
+from timeline_widget import TimelineWidget
 from notification_manager import NotificationManager
 from datetime import datetime, date
 
@@ -23,7 +24,7 @@ class MainWindow(Adw.ApplicationWindow):
         super().__init__(application=app)
 
         self.set_title("Goal UP")
-        self.set_default_size(800, 800)
+        self.set_default_size(1080, 850)
         
         # Set icon
         icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
@@ -55,11 +56,24 @@ class MainWindow(Adw.ApplicationWindow):
         self.export_button.connect("clicked", self._on_export_clicked)
         header.pack_end(self.export_button)
 
-        # Scrolled window for content
+        # Content area (Sidebar + Main)
+        content_horizontal_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        main_box.append(content_horizontal_box)
+
+        # Timeline Sidebar
+        self.timeline_widget = TimelineWidget()
+        content_horizontal_box.append(self.timeline_widget)
+
+        # Separator
+        separator = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        content_horizontal_box.append(separator)
+
+        # Scrolled window for main content
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_vexpand(True)
+        scrolled.set_hexpand(True)
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        main_box.append(scrolled)
+        content_horizontal_box.append(scrolled)
 
         # Clamp for responsive width
         clamp = Adw.Clamp()
@@ -151,13 +165,17 @@ class MainWindow(Adw.ApplicationWindow):
                 path = file.get_path()
                 goals = self._get_goals_data()
                 if export_to_ics(goals, path):
-                    self.notification_manager.send_notification(
-                        "Export Successful", 
-                        f"Calendar exported to {os.path.basename(path)}"
-                    )
-        except GLib.Error as e:
-            print(f"Export failed: {e.message}")
+                    # Show notification
+                    notification = Gio.Notification.new("Export Successful")
+                    notification.set_body(f"Calendar exported to {os.path.basename(path)}")
+                    self.get_application().send_notification("export", notification)
+                else:
+                    print("Failed to export ICS")
+        except Exception as e:
+            print(f"Export error: {e}")
 
+
+        
     def _get_goals_data(self) -> list:
         """Get all goals and tasks as a list of dictionaries."""
         goals = []
@@ -170,7 +188,8 @@ class MainWindow(Adw.ApplicationWindow):
                     "completed": row.completed,
                     "tasks": row.get_tasks(),
                     "created_at": row.created_at,
-                    "end_date": row.end_date
+                    "end_date": row.end_date,
+                    "completion_date": getattr(row, "_completion_date", "")
                 })
             row = row.get_next_sibling()
         return goals
@@ -217,6 +236,13 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _load_goals(self) -> None:
         """Load goals from storage."""
+        # Clear existing list
+        row = self.goal_list.get_first_child()
+        while row is not None:
+            next_row = row.get_next_sibling()
+            self.goal_list.remove(row)
+            row = next_row
+            
         goals = load_tasks()
         for goal in goals:
             self._add_goal(
@@ -227,6 +253,11 @@ class MainWindow(Adw.ApplicationWindow):
                 goal.get("created_at"),
                 goal.get("end_date")
             )
+            if goal.get("completion_date"):
+                row = self.goal_list.get_last_child()
+                if isinstance(row, GoalRow):
+                    row._completion_date = goal["completion_date"]
+                    row._update_days_remaining()
 
     def _save_goals(self) -> None:
         """Save all goals to storage."""
@@ -240,7 +271,8 @@ class MainWindow(Adw.ApplicationWindow):
                     "completed": row.completed,
                     "tasks": row.get_tasks(),
                     "created_at": row.created_at,
-                    "end_date": row.end_date
+                    "end_date": row.end_date,
+                    "completion_date": getattr(row, "_completion_date", "")
                 })
             row = row.get_next_sibling()
         save_tasks(goals)
@@ -256,6 +288,7 @@ class MainWindow(Adw.ApplicationWindow):
                     "title": row.goal_title,
                     "completed": row.completed,
                     "end_date": row.end_date,
+                    "completion_date": getattr(row, "_completion_date", ""),
                     "tasks": row.get_tasks()
                 })
             row = row.get_next_sibling()
@@ -282,7 +315,15 @@ class MainWindow(Adw.ApplicationWindow):
                 try:
                     end_date = datetime.strptime(goal["end_date"], "%Y-%m-%d").date()
                     days = (end_date - today).days
-                    if days >= 0:
+                    
+                    if days < 0:
+                        upcoming_events.append({
+                            "type": "goal",
+                            "text": goal["title"],
+                            "days": days,
+                            "color": (1.0, 0.2, 0.2) # Red for overdue
+                        })
+                    else:
                         upcoming_events.append({
                             "type": "goal",
                             "text": goal["title"],
@@ -298,7 +339,15 @@ class MainWindow(Adw.ApplicationWindow):
                     try:
                         end_date = datetime.strptime(task["end_date"], "%Y-%m-%d").date()
                         days = (end_date - today).days
-                        if days >= 0:
+                        
+                        if days < 0:
+                            upcoming_events.append({
+                                "type": "task",
+                                "text": f"{goal['title']} : {task['text']}",
+                                "days": days,
+                                "color": (1.0, 0.2, 0.2) # Red for overdue
+                            })
+                        else:
                             upcoming_events.append({
                                 "type": "task",
                                 "text": f"{goal['title']} : {task['text']}",
@@ -308,11 +357,12 @@ class MainWindow(Adw.ApplicationWindow):
                     except (ValueError, TypeError):
                         pass
 
-        # Sort by days and take top 4
+        # Sort: most overdue first (most negative), then soonest upcoming first
         upcoming_events.sort(key=lambda x: x['days'])
         top_4_events = upcoming_events[:4]
 
         self.summary_widget.update_status(completed_goals, total_goals, completed_tasks, total_tasks, top_4_events)
+        self.timeline_widget.update_data(goals)
 
     def _update_empty_state(self) -> None:
         """Show or hide the empty state message."""

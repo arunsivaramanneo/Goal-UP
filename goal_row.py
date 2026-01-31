@@ -29,6 +29,7 @@ class SubTaskRow(Adw.ActionRow):
         self._text = text
         self._completed = completed
         self._end_date = end_date
+        self._completion_date = ""  # Will be set when completed
 
         self.set_title(text)
 
@@ -86,7 +87,9 @@ class SubTaskRow(Adw.ActionRow):
     def _on_check_toggled(self, button: Gtk.CheckButton) -> None:
         self._completed = button.get_active()
         if self._completed:
-            self._end_date = date.today().isoformat()
+            self._completion_date = date.today().isoformat()
+        else:
+            self._completion_date = ""
         self._update_days_remaining()
         self._update_style()
         self.emit("task-toggled", self._completed)
@@ -120,7 +123,15 @@ class SubTaskRow(Adw.ActionRow):
             self.set_use_markup(False)
 
     def _update_days_remaining(self) -> None:
-        """Update the days remaining label based on end date."""
+        """Update the days remaining label based on end date and completion status."""
+        if self._completed:
+            if self._completion_date:
+                self.remaining_label.set_label(f"Completed on {self._completion_date}")
+            else:
+                self.remaining_label.set_label("Completed")
+            self.remaining_label.remove_css_class("error")
+            return
+
         if not self._end_date:
             self.remaining_label.set_label("")
             return
@@ -162,6 +173,7 @@ class GoalRow(Adw.ExpanderRow):
         self._subtask_rows = []  # Track sub-task rows for persistence
         self._created_at = created_at or datetime.now().isoformat()
         self._end_date = end_date or ""
+        self._completion_date = ""  # Will be set when completed
 
         self.set_title(title)
         if description:
@@ -176,35 +188,13 @@ class GoalRow(Adw.ExpanderRow):
 
         # Percentage completion label
         self.progress_label = Gtk.Label(label="0%")
-        self.progress_label.set_valign(Gtk.Align.CENTER)
-        self.progress_label.add_css_class("dim-label")
-        self.progress_label.set_margin_end(4)
-        self.add_suffix(self.progress_label)
-
-        # Task count label
         self.count_label = Gtk.Label(label="0/0")
-        self.count_label.set_valign(Gtk.Align.CENTER)
-        self.count_label.add_css_class("dim-label")
-        self.count_label.set_margin_end(8)
-        self.add_suffix(self.count_label)
-
-        # Days elapsed label
         self.days_label = Gtk.Label(label="0d")
-        self.days_label.set_valign(Gtk.Align.CENTER)
-        self.days_label.add_css_class("dim-label")
-        self.days_label.set_margin_end(4)
-        self.add_suffix(self.days_label)
-        self._update_days_elapsed()
-
-        # Days remaining label (only shown if end_date is set)
         self.remaining_label = Gtk.Label(label="")
-        self.remaining_label.set_valign(Gtk.Align.CENTER)
-        self.remaining_label.add_css_class("dim-label")
-        self.remaining_label.set_margin_end(8)
-        self.add_suffix(self.remaining_label)
-        self._update_days_remaining()
 
+        self._update_days_elapsed()
         self._update_days_remaining()
+        self._update_subtitle()
 
         # Add task entry row
         self._add_task_row = Adw.ActionRow()
@@ -233,7 +223,10 @@ class GoalRow(Adw.ExpanderRow):
 
         # Load existing tasks
         for task in self._tasks:
-            self._add_subtask(task.get("text", ""), task.get("completed", False), task.get("end_date", ""))
+            row = self._add_subtask(task.get("text", ""), task.get("completed", False), task.get("end_date", ""))
+            if row and task.get("completion_date"):
+                row._completion_date = task["completion_date"]
+                row._update_days_remaining()
 
         self._update_style()
         self._update_progress()
@@ -287,7 +280,8 @@ class GoalRow(Adw.ExpanderRow):
             tasks.append({
                 "text": row.task_text,
                 "completed": row.completed,
-                "end_date": row.end_date
+                "end_date": row.end_date,
+                "completion_date": getattr(row, "_completion_date", "")
             })
         return tasks
 
@@ -297,11 +291,11 @@ class GoalRow(Adw.ExpanderRow):
         self._description = description
         self._end_date = end_date
         self.set_title(title)
-        self.set_subtitle(description if description else "")
         self._update_days_remaining()
+        self._update_subtitle()
         self.emit("goal-changed")
 
-    def _add_subtask(self, text: str, completed: bool, end_date: str = "") -> None:
+    def _add_subtask(self, text: str, completed: bool, end_date: str = "") -> SubTaskRow:
         """Add a sub-task row."""
         row = SubTaskRow(text, completed, end_date)
         row.connect("task-toggled", self._on_subtask_toggled)
@@ -309,6 +303,7 @@ class GoalRow(Adw.ExpanderRow):
         row.connect("task-deleted", self._on_subtask_deleted, row)
         self._subtask_rows.append(row)
         self.add_row(row)
+        return row
 
     def _on_subtask_toggled(self, row: SubTaskRow, completed: bool) -> None:
         """Handle sub-task toggle."""
@@ -340,8 +335,11 @@ class GoalRow(Adw.ExpanderRow):
     def _on_check_toggled(self, button: Gtk.CheckButton) -> None:
         self._completed = button.get_active()
         if self._completed:
-            self._end_date = date.today().isoformat()
+            self._completion_date = date.today().isoformat()
+        else:
+            self._completion_date = ""
         self._update_days_remaining()
+        self._update_subtitle()
         self._update_style()
         self.emit("goal-changed")
 
@@ -370,6 +368,26 @@ class GoalRow(Adw.ExpanderRow):
         percentage = int((completed_count / total_count) * 100)
         self.progress_label.set_label(f"{percentage}%")
         self.count_label.set_label(f"{completed_count}/{total_count}")
+        self._update_subtitle()
+
+    def _update_subtitle(self) -> None:
+        """Update the consolidated subtitle with all details."""
+        lines = []
+        if self._description:
+            lines.append(self._description)
+        
+        details = []
+        details.append(f"<b>Progress:</b> {self.progress_label.get_label()}")
+        details.append(f"<b>Tasks:</b> {self.count_label.get_label()}")
+        details.append(f"<b>Age:</b> {self.days_label.get_label()}")
+        
+        status = self.remaining_label.get_label()
+        if status:
+            details.append(f"<b>Status:</b> {status}")
+        
+        lines.append(" | ".join(details))
+        
+        self.set_subtitle("\n".join(lines))
     def _update_days_elapsed(self) -> None:
         """Update the days elapsed label based on creation date."""
         try:
@@ -377,11 +395,20 @@ class GoalRow(Adw.ExpanderRow):
             today = date.today()
             days = (today - created_date).days
             self.days_label.set_label(f"{days}d")
+            self._update_subtitle()
         except (ValueError, TypeError):
             self.days_label.set_label("0d")
 
     def _update_days_remaining(self) -> None:
-        """Update the days remaining label based on end date."""
+        """Update the days remaining label based on end date and completion status."""
+        if self._completed:
+            if self._completion_date:
+                self.remaining_label.set_label(f"Completed on {self._completion_date}")
+            else:
+                self.remaining_label.set_label("Completed")
+            self.remaining_label.remove_css_class("error")
+            return
+
         if not self._end_date:
             self.remaining_label.set_label("")
             return
@@ -400,3 +427,5 @@ class GoalRow(Adw.ExpanderRow):
                 
         except (ValueError, TypeError):
             self.remaining_label.set_label("")
+        
+        self._update_subtitle()
