@@ -15,11 +15,14 @@ class EditGoalDialog(Adw.Dialog):
     __gtype_name__ = "EditGoalDialog"
 
     __gsignals__ = {
-        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str)),  # title, description, end_date
+        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str, str)),  # title, description, end_date, parent_id
     }
 
-    def __init__(self, title: str = "", description: str = "", end_date: str = ""):
+    def __init__(self, title: str = "", description: str = "", end_date: str = "", parent_id: str = "", possible_parents: list[tuple[str, str]] = None):
         super().__init__()
+
+        self._parent_id = parent_id
+        self._possible_parents = possible_parents or [] # List of (id, title)
 
         self.set_title("Edit Goal")
         self.set_content_width(400)
@@ -102,6 +105,29 @@ class EditGoalDialog(Adw.Dialog):
         clear_date_btn.connect("clicked", self._on_clear_date_clicked)
         self.date_row.add_suffix(clear_date_btn)
 
+        # Parent Selection group (Optional)
+        parent_group = Adw.PreferencesGroup()
+        parent_group.set_title("Dependency")
+        content_box.append(parent_group)
+
+        self.parent_row = Adw.ComboRow()
+        self.parent_row.set_title("Parent Goal")
+        self.parent_row.set_subtitle("Optional: Select a goal this one depends on")
+        
+        # Add "None" option
+        model = Gtk.StringList()
+        model.append("None")
+        
+        selected_index = 0
+        for i, (p_id, p_title) in enumerate(self._possible_parents):
+            model.append(p_title)
+            if p_id == self._parent_id:
+                selected_index = i + 1
+        
+        self.parent_row.set_model(model)
+        self.parent_row.set_selected(selected_index)
+        parent_group.add(self.parent_row)
+
         self._chosen_date = end_date
 
     def _on_pick_date_clicked(self, button: Gtk.Button) -> None:
@@ -149,8 +175,14 @@ class EditGoalDialog(Adw.Dialog):
         description = self.desc_row.get_text().strip()
         end_date = self._chosen_date
         
+        parent_idx = self.parent_row.get_selected()
+        if parent_idx == 0:
+            parent_id = ""
+        else:
+            parent_id = self._possible_parents[parent_idx - 1][0]
+        
         if title:
-            self.emit("save", title, description, end_date)
+            self.emit("save", title, description, end_date, parent_id)
             self.close()
 
 
@@ -160,11 +192,14 @@ class EditTaskDialog(Adw.Dialog):
     __gtype_name__ = "EditTaskDialog"
 
     __gsignals__ = {
-        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str)),  # text, end_date
+        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str)),  # text, end_date, parent_id
     }
 
-    def __init__(self, text: str = "", end_date: str = ""):
+    def __init__(self, text: str = "", end_date: str = "", parent_id: str = "", possible_parents: list[tuple[str, str]] = None):
         super().__init__()
+
+        self._parent_id = parent_id
+        self._possible_parents = possible_parents or []
 
         self.set_title("Edit Task")
         self.set_content_width(400)
@@ -237,6 +272,28 @@ class EditTaskDialog(Adw.Dialog):
         clear_btn.connect("clicked", self._on_clear_date_clicked)
         self.date_row.add_suffix(clear_btn)
 
+        # Parent Selection group (Optional)
+        parent_group = Adw.PreferencesGroup()
+        parent_group.set_title("Dependency")
+        content_box.append(parent_group)
+
+        self.parent_row = Adw.ComboRow()
+        self.parent_row.set_title("Parent Task")
+        self.parent_row.set_subtitle("Optional: Select a task this one depends on")
+        
+        model = Gtk.StringList()
+        model.append("None")
+        
+        selected_index = 0
+        for i, (p_id, p_title) in enumerate(self._possible_parents):
+            model.append(p_title)
+            if p_id == self._parent_id:
+                selected_index = i + 1
+        
+        self.parent_row.set_model(model)
+        self.parent_row.set_selected(selected_index)
+        parent_group.add(self.parent_row)
+
         self._chosen_date = end_date
 
     def _on_pick_date_clicked(self, button: Gtk.Button) -> None:
@@ -281,7 +338,13 @@ class EditTaskDialog(Adw.Dialog):
         """Handle save button click."""
         text = self.text_row.get_text().strip()
         end_date = self._chosen_date
+        
+        parent_idx = self.parent_row.get_selected()
+        if parent_idx == 0:
+            parent_id = ""
+        else:
+            parent_id = self._possible_parents[parent_idx - 1][0]
 
         if text:
-            self.emit("save", text, end_date)
+            self.emit("save", text, end_date, parent_id)
             self.close()

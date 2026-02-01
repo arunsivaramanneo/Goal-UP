@@ -7,6 +7,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk, GObject
 
+import uuid
 from datetime import datetime, date
 
 from edit_dialog import EditTaskDialog
@@ -23,15 +24,19 @@ class SubTaskRow(Adw.ActionRow):
         "task-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
-    def __init__(self, text: str, completed: bool = False, end_date: str = ""):
+    def __init__(self, text: str, completed: bool = False, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0):
         super().__init__()
 
+        self._id = id or uuid.uuid4().hex
+        self._parent_id = parent_id
+        self._depth = depth
         self._text = text
         self._completed = completed
         self._end_date = end_date
         self._completion_date = ""  # Will be set when completed
 
         self.set_title(text)
+        self.set_margin_start(self._depth * 24)
 
         # Checkbox
         self.check_button = Gtk.CheckButton()
@@ -84,6 +89,27 @@ class SubTaskRow(Adw.ActionRow):
     def end_date(self) -> str:
         return self._end_date
 
+    @property
+    def id(self) -> str:
+        return self._id
+
+    @property
+    def parent_id(self) -> str:
+        return self._parent_id
+
+    @parent_id.setter
+    def parent_id(self, value: str) -> None:
+        self._parent_id = value
+
+    @property
+    def depth(self) -> int:
+        return self._depth
+
+    @depth.setter
+    def depth(self, value: int) -> None:
+        self._depth = value
+        self.set_margin_start(value * 24)
+
     def _on_check_toggled(self, button: Gtk.CheckButton) -> None:
         self._completed = button.get_active()
         if self._completed:
@@ -98,19 +124,67 @@ class SubTaskRow(Adw.ActionRow):
         self.emit("task-deleted")
 
     def _on_edit_clicked(self, button: Gtk.Button) -> None:
-        dialog = EditTaskDialog(self._text, self._end_date)
+        # Get list of possible parents (all OTHER tasks in this goal to avoid cycles for now)
+        # This is simplified; window.py will handle complex cycle detection if needed
+        # For now, just allow selecting any task that isn't this one or a descendant.
+        possible_parents = []
+        parent_goal = self._get_parent_goal()
+        if parent_goal:
+            all_tasks = parent_goal.get_tasks_with_ids()
+            # Filter out self and potential descendants to avoid cycles
+            descendants = self._get_descendant_ids(all_tasks)
+            for t_id, t_text in all_tasks:
+                if t_id != self._id and t_id not in descendants:
+                    possible_parents.append((t_id, t_text))
+
+        dialog = EditTaskDialog(self._text, self._end_date, self._parent_id, possible_parents)
         dialog.connect("save", self._on_edit_save)
         # Find the root window to present the dialog
         root = self.get_root()
         if root:
             dialog.present(root)
 
-    def _on_edit_save(self, dialog: EditTaskDialog, text: str, end_date: str) -> None:
+    def _get_parent_goal(self):
+        """Find the GoalRow containing this subtask."""
+        widget = self.get_parent()
+        while widget and not isinstance(widget, GoalRow):
+            widget = widget.get_parent()
+        return widget
+
+    def _get_descendant_ids(self, all_tasks_data):
+        """Find all recursive descendant IDs of this task."""
+        # all_tasks_data is list of (id, text, parent_id)
+        # Wait, get_tasks_with_ids needs to return parent_id too
+        descendants = set()
+        to_check = [self._id]
+        
+        # Need a more complete list for this
+        parent_goal = self._get_parent_goal()
+        if not parent_goal:
+            return descendants
+            
+        full_tasks = parent_goal.get_tasks_full()
+        
+        while to_check:
+            current_id = to_check.pop()
+            for t in full_tasks:
+                if t.get("parent_id") == current_id:
+                    if t["id"] not in descendants:
+                        descendants.add(t["id"])
+                        to_check.append(t["id"])
+        return descendants
+
+    def _on_edit_save(self, dialog: EditTaskDialog, text: str, end_date: str, parent_id: str) -> None:
         self._text = text
         self._end_date = end_date
+        self._parent_id = parent_id
         self._update_days_remaining()
         self._update_style()
         self.emit("task-changed", self._text)
+        # Re-trigger reordering in parent goal
+        parent_goal = self._get_parent_goal()
+        if parent_goal:
+            parent_goal.reorder_tasks()
 
     def _update_style(self) -> None:
         if self._completed:
@@ -163,9 +237,12 @@ class GoalRow(Adw.ExpanderRow):
         "edit-requested": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
-    def __init__(self, title: str, description: str = "", completed: bool = False, tasks: list = None, created_at: str = None, end_date: str = ""):
+    def __init__(self, title: str, description: str = "", completed: bool = False, tasks: list = None, created_at: str = None, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0):
         super().__init__()
 
+        self._id = id or uuid.uuid4().hex
+        self._parent_id = parent_id
+        self._depth = depth
         self._title = title
         self._description = description
         self._completed = completed
@@ -178,6 +255,8 @@ class GoalRow(Adw.ExpanderRow):
         self.set_title(title)
         if description:
             self.set_subtitle(description)
+        
+        self.set_margin_start(self._depth * 24)
 
         # Checkbox for goal completion
         self.check_button = Gtk.CheckButton()
@@ -222,11 +301,14 @@ class GoalRow(Adw.ExpanderRow):
         self.add_row(self._add_task_row)
 
         # Load existing tasks
-        for task in self._tasks:
-            row = self._add_subtask(task.get("text", ""), task.get("completed", False), task.get("end_date", ""))
-            if row and task.get("completion_date"):
-                row._completion_date = task["completion_date"]
-                row._update_days_remaining()
+        if tasks:
+            # We'll re-add them in window/_load_goals or use a helper
+            # But here we need to handle the structure.
+            # For now, just add them as flat, window.py will handle the full hierarchy.
+            for task in tasks:
+                self._add_subtask_from_dict(task)
+        
+        self.reorder_tasks()
 
         self._update_style()
         self._update_progress()
@@ -273,11 +355,34 @@ class GoalRow(Adw.ExpanderRow):
     def end_date(self) -> str:
         return self._end_date
 
+    @property
+    def id(self) -> str:
+        return self._id
+
+    @property
+    def parent_id(self) -> str:
+        return self._parent_id
+
+    @parent_id.setter
+    def parent_id(self, value: str) -> None:
+        self._parent_id = value
+
+    @property
+    def depth(self) -> int:
+        return self._depth
+
+    @depth.setter
+    def depth(self, value: int) -> None:
+        self._depth = value
+        self.set_margin_start(value * 24)
+
     def get_tasks(self) -> list:
         """Get all sub-tasks as list of dicts."""
         tasks = []
         for row in self._subtask_rows:
             tasks.append({
+                "id": row.id,
+                "parent_id": row.parent_id,
                 "text": row.task_text,
                 "completed": row.completed,
                 "end_date": row.end_date,
@@ -285,25 +390,102 @@ class GoalRow(Adw.ExpanderRow):
             })
         return tasks
 
-    def update_details(self, title: str, description: str, end_date: str = "") -> None:
-        """Update goal title, description, and end date."""
+    def get_tasks_full(self) -> list:
+        """Alias for get_tasks() used for internal logic."""
+        return self.get_tasks()
+
+    def get_tasks_with_ids(self) -> list[tuple[str, str]]:
+        """Return list of (id, text) for possible parents."""
+        return [(row.id, row.task_text) for row in self._subtask_rows]
+
+    def update_details(self, title: str, description: str, end_date: str = "", parent_id: str = "") -> None:
+        """Update goal title, description, end date, and parent."""
         self._title = title
         self._description = description
         self._end_date = end_date
+        self._parent_id = parent_id
         self.set_title(title)
         self._update_days_remaining()
         self._update_subtitle()
         self.emit("goal-changed")
 
-    def _add_subtask(self, text: str, completed: bool, end_date: str = "") -> SubTaskRow:
+    def _add_subtask(self, text: str, completed: bool, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0) -> SubTaskRow:
         """Add a sub-task row."""
-        row = SubTaskRow(text, completed, end_date)
+        row = SubTaskRow(text, completed, end_date, id, parent_id, depth)
         row.connect("task-toggled", self._on_subtask_toggled)
         row.connect("task-changed", self._on_subtask_changed)
         row.connect("task-deleted", self._on_subtask_deleted, row)
         self._subtask_rows.append(row)
         self.add_row(row)
         return row
+        
+    def _add_subtask_from_dict(self, task: dict) -> SubTaskRow:
+        row = self._add_subtask(
+            task.get("text", ""),
+            task.get("completed", False),
+            task.get("end_date", ""),
+            task.get("id"),
+            task.get("parent_id", ""),
+            task.get("depth", 0)
+        )
+        if row and task.get("completion_date"):
+            row._completion_date = task["completion_date"]
+            row._update_days_remaining()
+        return row
+
+    def reorder_tasks(self) -> None:
+        """Reorder subtask rows to show hierarchy and update indentation."""
+        # This will remove all rows and re-add them in depth-first order
+        # We need to preserve the "Add Task" row at the bottom though.
+        
+        # 1. Identify hierarchy
+        tasks_by_parent = {}
+        top_level = []
+        rows_by_id = {row.id: row for row in self._subtask_rows}
+        
+        for row in self._subtask_rows:
+            p_id = row.parent_id
+            if not p_id or p_id not in rows_by_id:
+                top_level.append(row)
+            else:
+                if p_id not in tasks_by_parent:
+                    tasks_by_parent[p_id] = []
+                tasks_by_parent[p_id].append(row)
+        
+        # 2. Flatten hierarchy in DFS order
+        ordered_rows = []
+        def dfs(rows, depth):
+            for r in rows:
+                r.depth = depth
+                ordered_rows.append(r)
+                if r.id in tasks_by_parent:
+                    dfs(tasks_by_parent[r.id], depth + 1)
+        
+        dfs(top_level, 0)
+        
+        # 3. Update the UI
+        # Removing and re-adding might be flickery, but it's the simplest way with Gtk.ListBox via Adw.ExpanderRow
+        # Adw.ExpanderRow manages its own internal listbox.
+        
+        # We need to find the internal listbox to reorder.
+        # Actually, since we use `add_row`, we can't easily reorder without removing.
+        # Let's hope removing and re-adding is fine.
+        
+        # First, detach all rows EXCEPT the "Add Task" row
+        for row in self._subtask_rows:
+            self.remove(row)
+        
+        # Re-add in order BEFORE the "Add Task" row
+        # Adw.ExpanderRow.add_row appends. So we need to remove "Add Task" row too and re-add it at the end.
+        self.remove(self._add_task_row)
+        
+        for row in ordered_rows:
+            self.add_row(row)
+        
+        self.add_row(self._add_task_row)
+        
+        # Update our internal list to match the new order for next time
+        self._subtask_rows = ordered_rows
 
     def _on_subtask_toggled(self, row: SubTaskRow, completed: bool) -> None:
         """Handle sub-task toggle."""

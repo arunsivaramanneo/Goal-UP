@@ -270,6 +270,8 @@ class MainWindow(Adw.ApplicationWindow):
         while row is not None:
             if isinstance(row, GoalRow):
                 goals.append({
+                    "id": row.id,
+                    "parent_id": row.parent_id,
                     "title": row.goal_title,
                     "description": row.description,
                     "completed": row.completed,
@@ -289,12 +291,13 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._add_goal(text, "", False, [], None)
         self.goal_entry.set_text("")
+        self._reorder_goals()
         self._save_goals()
         self._update_empty_state()
 
-    def _add_goal(self, title: str, description: str, completed: bool, tasks: list, created_at: str = None, end_date: str = "") -> None:
+    def _add_goal(self, title: str, description: str, completed: bool, tasks: list, created_at: str = None, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0) -> None:
         """Add a new goal to the list."""
-        row = GoalRow(title, description, completed, tasks, created_at, end_date)
+        row = GoalRow(title, description, completed, tasks, created_at, end_date, id, parent_id, depth)
         row.connect("goal-changed", self._on_goal_changed)
         row.connect("goal-deleted", self._on_goal_deleted)
         row.connect("edit-requested", self._on_edit_requested)
@@ -312,13 +315,33 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_edit_requested(self, row: GoalRow) -> None:
         """Handle edit request for a goal."""
-        dialog = EditGoalDialog(row.goal_title, row.description)
+        # Get possible parents (avoiding self and descendants)
+        possible_parents = []
+        all_goals = self._get_goals_data()
+        
+        # Get descendants
+        descendants = set()
+        to_check = [row.id]
+        while to_check:
+            curr_id = to_check.pop()
+            for g in all_goals:
+                if g.get("parent_id") == curr_id:
+                    if g["id"] not in descendants:
+                        descendants.add(g["id"])
+                        to_check.append(g["id"])
+        
+        for g in all_goals:
+            if g["id"] != row.id and g["id"] not in descendants:
+                possible_parents.append((g["id"], g["title"]))
+
+        dialog = EditGoalDialog(row.goal_title, row.description, row.end_date, row.parent_id, possible_parents)
         dialog.connect("save", self._on_edit_save, row)
         dialog.present(self)
 
-    def _on_edit_save(self, dialog: EditGoalDialog, title: str, description: str, end_date: str, row: GoalRow) -> None:
+    def _on_edit_save(self, dialog: EditGoalDialog, title: str, description: str, end_date: str, parent_id: str, row: GoalRow) -> None:
         """Handle save from edit dialog."""
-        row.update_details(title, description, end_date)
+        row.update_details(title, description, end_date, parent_id)
+        self._reorder_goals()
         self._save_goals()
 
     def _load_goals(self) -> None:
@@ -338,13 +361,18 @@ class MainWindow(Adw.ApplicationWindow):
                 goal.get("completed", False),
                 goal.get("tasks", []),
                 goal.get("created_at"),
-                goal.get("end_date")
+                goal.get("end_date"),
+                goal.get("id"),
+                goal.get("parent_id", ""),
+                goal.get("depth", 0)
             )
             if goal.get("completion_date"):
                 row = self.goal_list.get_last_child()
                 if isinstance(row, GoalRow):
                     row._completion_date = goal["completion_date"]
                     row._update_days_remaining()
+        
+        self._reorder_goals()
 
     def _save_goals(self) -> None:
         """Save all goals to storage."""
@@ -353,6 +381,8 @@ class MainWindow(Adw.ApplicationWindow):
         while row is not None:
             if isinstance(row, GoalRow):
                 goals.append({
+                    "id": row.id,
+                    "parent_id": row.parent_id,
                     "title": row.goal_title,
                     "description": row.description,
                     "completed": row.completed,
@@ -364,6 +394,56 @@ class MainWindow(Adw.ApplicationWindow):
             row = row.get_next_sibling()
         save_tasks(goals)
         self._update_summary_from_list(goals)
+    
+    def _reorder_goals(self) -> None:
+        """Reorder goals to show hierarchy and update indentation."""
+        # 1. Collect all rows
+        all_rows = []
+        row = self.goal_list.get_first_child()
+        while row is not None:
+            if isinstance(row, GoalRow):
+                all_rows.append(row)
+            row = row.get_next_sibling()
+        
+        if not all_rows:
+            return
+
+        # 2. Identify hierarchy
+        goals_by_parent = {}
+        top_level = []
+        rows_by_id = {r.id: r for r in all_rows}
+        
+        for r in all_rows:
+            p_id = r.parent_id
+            if not p_id or p_id not in rows_by_id:
+                top_level.append(r)
+            else:
+                if p_id not in goals_by_parent:
+                    goals_by_parent[p_id] = []
+                goals_by_parent[p_id].append(r)
+        
+        # 3. Flatten hierarchy in DFS order
+        ordered_rows = []
+        def dfs(rows, depth):
+            for r in rows:
+                r.depth = depth
+                ordered_rows.append(r)
+                if r.id in goals_by_parent:
+                    dfs(goals_by_parent[r.id], depth + 1)
+        
+        dfs(top_level, 0)
+        
+        # 4. Re-populate the Gtk.ListBox
+        # Note: We can use Gtk.ListBox.reorder_child in Gtk 3, 
+        # but in Gtk 4 we need to remove and re-append or use a sort function.
+        # Actually, Gtk4 ListBox has insert() which can be used to reorder.
+        # But removing and re-adding is easiest to ensure exact DFS order.
+        
+        for r in all_rows:
+            self.goal_list.remove(r)
+            
+        for r in ordered_rows:
+            self.goal_list.append(r)
     
     def _update_summary(self) -> None:
         """Update summary from current widget state."""
