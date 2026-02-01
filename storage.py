@@ -89,3 +89,21 @@ def export_to_ics(tasks: list[dict], output_path: str) -> bool:
     except IOError:
         return False
 
+
+def export_backup(tasks: list[dict], output_path: str) -> bool:
+    """Export goals and tasks to a JSON file for backup."""
+    try:
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(tasks, f, indent=2, ensure_ascii=False)
+        return True
+    except IOError:
+        return False
+
+
+def import_backup(input_path: str) -> list[dict] | None:
+    """Import goals and tasks from a JSON backup file."""
+    try:
+        with open(input_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return None

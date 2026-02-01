@@ -6,11 +6,11 @@ import os
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gtk, Gdk, Gio
+from gi.repository import Adw, Gtk, Gdk, Gio, GLib
 
 from goal_row import GoalRow
 from edit_dialog import EditGoalDialog
-from storage import load_tasks, save_tasks, export_to_ics
+from storage import load_tasks, save_tasks, export_to_ics, export_backup, import_backup
 from summary_widget import GoalSummaryWidget
 from timeline_widget import TimelineWidget
 from notification_manager import NotificationManager
@@ -49,12 +49,30 @@ class MainWindow(Adw.ApplicationWindow):
         header = Adw.HeaderBar()
         main_box.append(header)
 
-        # Export button
-        self.export_button = Gtk.Button()
-        self.export_button.set_icon_name("document-save-symbolic")
-        self.export_button.set_tooltip_text("Export to Calendar (ICS)")
-        self.export_button.connect("clicked", self._on_export_clicked)
-        header.pack_end(self.export_button)
+        # Data Menu
+        data_menu = Gio.Menu()
+        data_menu.append("Export to JSON (Backup)", "win.export-json")
+        data_menu.append("Import from JSON (Restore)", "win.import-json")
+        data_menu.append("Export to Calendar (ICS)", "win.export-ics")
+
+        self.data_button = Gtk.MenuButton()
+        self.data_button.set_icon_name("document-save-symbolic")
+        self.data_button.set_tooltip_text("Data Management")
+        self.data_button.set_menu_model(data_menu)
+        header.pack_end(self.data_button)
+
+        # Actions for the menu
+        export_ics_action = Gio.SimpleAction.new("export-ics", None)
+        export_ics_action.connect("activate", self._on_export_ics_clicked)
+        self.add_action(export_ics_action)
+
+        export_json_action = Gio.SimpleAction.new("export-json", None)
+        export_json_action.connect("activate", self._on_export_json_clicked)
+        self.add_action(export_json_action)
+
+        import_json_action = Gio.SimpleAction.new("import-json", None)
+        import_json_action.connect("activate", self._on_import_json_clicked)
+        self.add_action(import_json_action)
 
         # Content area (Sidebar + Main)
         content_horizontal_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
@@ -141,8 +159,8 @@ class MainWindow(Adw.ApplicationWindow):
         goals = self._get_goals_data()
         self.notification_manager.check_upcoming_events(goals)
 
-    def _on_export_clicked(self, button: Gtk.Button) -> None:
-        """Handle export button click."""
+    def _on_export_ics_clicked(self, action: Gio.SimpleAction, parameter: GLib.Variant = None) -> None:
+        """Handle export to ICS button click."""
         dialog = Gtk.FileDialog(title="Export to Calendar")
         dialog.set_initial_name("goals.ics")
         
@@ -155,17 +173,16 @@ class MainWindow(Adw.ApplicationWindow):
         filters.append(filter_ics)
         dialog.set_filters(filters)
 
-        dialog.save(self, None, self._on_export_file_selected)
+        dialog.save(self, None, self._on_export_ics_file_selected)
 
-    def _on_export_file_selected(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:
-        """Handle file selection for export."""
+    def _on_export_ics_file_selected(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:
+        """Handle file selection for ICS export."""
         try:
             file = dialog.save_finish(result)
             if file:
                 path = file.get_path()
                 goals = self._get_goals_data()
                 if export_to_ics(goals, path):
-                    # Show notification
                     notification = Gio.Notification.new("Export Successful")
                     notification.set_body(f"Calendar exported to {os.path.basename(path)}")
                     self.get_application().send_notification("export", notification)
@@ -173,6 +190,76 @@ class MainWindow(Adw.ApplicationWindow):
                     print("Failed to export ICS")
         except Exception as e:
             print(f"Export error: {e}")
+
+    def _on_export_json_clicked(self, action: Gio.SimpleAction, parameter: GLib.Variant = None) -> None:
+        """Handle export to JSON button click."""
+        dialog = Gtk.FileDialog(title="Export Backup (JSON)")
+        dialog.set_initial_name("goals_backup.json")
+        
+        filter_json = Gtk.FileFilter()
+        filter_json.set_name("JSON files")
+        filter_json.add_mime_type("application/json")
+        filter_json.add_suffix("json")
+        
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(filter_json)
+        dialog.set_filters(filters)
+
+        dialog.save(self, None, self._on_export_json_file_selected)
+
+    def _on_export_json_file_selected(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:
+        """Handle file selection for JSON export."""
+        try:
+            file = dialog.save_finish(result)
+            if file:
+                path = file.get_path()
+                goals = self._get_goals_data()
+                if export_backup(goals, path):
+                    notification = Gio.Notification.new("Backup Successful")
+                    notification.set_body(f"Backup saved to {os.path.basename(path)}")
+                    self.get_application().send_notification("export", notification)
+                else:
+                    print("Failed to export backup")
+        except Exception as e:
+            print(f"Export error: {e}")
+
+    def _on_import_json_clicked(self, action: Gio.SimpleAction, parameter: GLib.Variant = None) -> None:
+        """Handle import from JSON button click."""
+        dialog = Gtk.FileDialog(title="Import Backup (JSON)")
+        
+        filter_json = Gtk.FileFilter()
+        filter_json.set_name("JSON files")
+        filter_json.add_mime_type("application/json")
+        filter_json.add_suffix("json")
+        
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(filter_json)
+        dialog.set_filters(filters)
+
+        dialog.open(self, None, self._on_import_json_file_selected)
+
+    def _on_import_json_file_selected(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:
+        """Handle file selection for JSON import."""
+        try:
+            file = dialog.open_finish(result)
+            if file:
+                path = file.get_path()
+                tasks = import_backup(path)
+                if tasks is not None:
+                    # Confirm with user before overwriting? 
+                    # For now just import and save.
+                    save_tasks(tasks)
+                    self._load_goals()
+                    self._update_empty_state()
+                    self._update_summary()
+                    
+                    notification = Gio.Notification.new("Import Successful")
+                    notification.set_body(f"Imported {len(tasks)} goals from backup")
+                    self.get_application().send_notification("import", notification)
+                else:
+                    print("Failed to import backup")
+        except Exception as e:
+            print(f"Import error: {e}")
 
 
         
