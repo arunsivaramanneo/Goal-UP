@@ -5,7 +5,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gtk, GObject, GLib
+from gi.repository import Adw, Gtk, Gdk, GObject, GLib
 from datetime import datetime
 
 
@@ -15,14 +15,15 @@ class EditGoalDialog(Adw.Dialog):
     __gtype_name__ = "EditGoalDialog"
 
     __gsignals__ = {
-        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str, str)),  # title, description, end_date, parent_id
+        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str, str, str)),  # title, description, end_date, parent_id, color
     }
 
-    def __init__(self, title: str = "", description: str = "", end_date: str = "", parent_id: str = "", possible_parents: list[tuple[str, str]] = None):
+    def __init__(self, title: str = "", description: str = "", end_date: str = "", parent_id: str = "", color: str = "", possible_parents: list[tuple[str, str]] = None):
         super().__init__()
 
         self._parent_id = parent_id
         self._possible_parents = possible_parents or [] # List of (id, title)
+        self._initial_color = color or "rgb(53,132,228)"
 
         self.set_title("Edit Goal")
         self.set_content_width(400)
@@ -128,6 +129,25 @@ class EditGoalDialog(Adw.Dialog):
         self.parent_row.set_selected(selected_index)
         parent_group.add(self.parent_row)
 
+        # Appearance group
+        appearance_group = Adw.PreferencesGroup()
+        appearance_group.set_title("Appearance")
+        content_box.append(appearance_group)
+        
+        self.color_row = Adw.ActionRow()
+        self.color_row.set_title("Goal Color")
+        appearance_group.add(self.color_row)
+        
+        self.color_button = Gtk.ColorButton()
+        self.color_button.set_valign(Gtk.Align.CENTER)
+        
+        # Set initial color
+        color = Gdk.RGBA()
+        if color.parse(self._initial_color):
+            self.color_button.set_rgba(color)
+            
+        self.color_row.add_suffix(self.color_button)
+
         self._chosen_date = end_date
 
     def _on_pick_date_clicked(self, button: Gtk.Button) -> None:
@@ -182,7 +202,8 @@ class EditGoalDialog(Adw.Dialog):
             parent_id = self._possible_parents[parent_idx - 1][0]
         
         if title:
-            self.emit("save", title, description, end_date, parent_id)
+            color = self.color_button.get_rgba().to_string()
+            self.emit("save", title, description, end_date, parent_id, color)
             self.close()
 
 

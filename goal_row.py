@@ -5,7 +5,8 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gtk, GObject
+from gi.repository import Adw, Gtk, Gdk, GObject
+import cairo
 
 import uuid
 from datetime import datetime, date
@@ -237,7 +238,7 @@ class GoalRow(Adw.ExpanderRow):
         "edit-requested": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
-    def __init__(self, title: str, description: str = "", completed: bool = False, tasks: list = None, created_at: str = None, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0):
+    def __init__(self, title: str, description: str = "", completed: bool = False, tasks: list = None, created_at: str = None, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, color: str = None):
         super().__init__()
 
         self._id = id or uuid.uuid4().hex
@@ -251,6 +252,43 @@ class GoalRow(Adw.ExpanderRow):
         self._created_at = created_at or datetime.now().isoformat()
         self._end_date = end_date or ""
         self._completion_date = ""  # Will be set when completed
+        self._color = color or "rgb(53,132,228)" # Default blue
+
+        self.set_title(title)
+        if description:
+            self.set_subtitle(description)
+        
+        self.set_margin_start(self._depth * 24)
+
+        # Color indicator
+        self.color_indicator = Gtk.Image.new_from_icon_name("media-record-symbolic")
+        self.color_indicator.set_valign(Gtk.Align.CENTER)
+        
+        # We need to parse color string to Gdk.RGBA to set it
+        rgba = Gdk.RGBA()
+        if rgba.parse(self._color):
+            # Create a snapshot to draw the colored circle? 
+            # Or just use CSS. But CSS is hard with dynamic colors.
+            # Best is to use custom drawing or a snapshot. 
+            # Actually Gtk.Image doesn't easily support arbitrary colors without CSS provider.
+            # Let's try drawing a crude circle with Gtk.DrawingArea? Too heavy.
+            # Let's use CSS provider with a unique class name? Maybe too many classes.
+            # Let's use a Gtk.Box with a background color using CSS (but inline style is not supported directly in Gtk4 without parsing).
+            # Actually, we can use Gtk.Widget.set_cursor or something? No.
+            
+            # Use a simple helper to apply color to the icon?
+            # In Gtk4, we can use a custom paintable?
+            # Or simpler: Just use a label with a colored unicode circle? 🔴 🟠 🟡 🟢 🔵 🟣 🟤 ⚫ ⚪
+            # But user can pick ANY color.
+            
+            # Let's try inserting a small DrawingArea.
+            self.color_indicator = Gtk.DrawingArea()
+            self.color_indicator.set_content_width(12)
+            self.color_indicator.set_content_height(12)
+            self.color_indicator.set_valign(Gtk.Align.CENTER)
+            self.color_indicator.set_draw_func(self._draw_color_indicator)
+            
+        self.add_prefix(self.color_indicator)
 
         self.set_title(title)
         if description:
@@ -275,7 +313,7 @@ class GoalRow(Adw.ExpanderRow):
         self._update_days_remaining()
         self._update_subtitle()
 
-        # Add task entry row
+        # Add task entry row (at the top)
         self._add_task_row = Adw.ActionRow()
         self._add_task_row.set_title("Add Task")
         self._add_task_row.add_css_class("dim-label")
@@ -298,9 +336,10 @@ class GoalRow(Adw.ExpanderRow):
         add_button.connect("clicked", self._on_add_task)
         self._add_task_row.add_suffix(add_button)
 
+        # Add the "Add Task" row first (at the top)
         self.add_row(self._add_task_row)
 
-        # Load existing tasks
+        # Load existing tasks (they will appear below the Add Task row)
         if tasks:
             # We'll re-add them in window/_load_goals or use a helper
             # But here we need to handle the structure.
@@ -398,16 +437,37 @@ class GoalRow(Adw.ExpanderRow):
         """Return list of (id, text) for possible parents."""
         return [(row.id, row.task_text) for row in self._subtask_rows]
 
-    def update_details(self, title: str, description: str, end_date: str = "", parent_id: str = "") -> None:
-        """Update goal title, description, end date, and parent."""
+    @property
+    def color(self) -> str:
+        return self._color
+
+    def update_details(self, title: str, description: str, end_date: str = "", parent_id: str = "", color: str = None) -> None:
+        """Update goal title, description, end date, parent, and color."""
         self._title = title
         self._description = description
         self._end_date = end_date
         self._parent_id = parent_id
+        if color:
+            self._color = color
+            self.color_indicator.queue_draw()
+            
         self.set_title(title)
         self._update_days_remaining()
         self._update_subtitle()
         self.emit("goal-changed")
+
+    def _draw_color_indicator(self, area, cr: cairo.Context, width: int, height: int) -> None:
+        """Draw the color indicator circle."""
+        rgba = Gdk.RGBA()
+        if rgba.parse(self._color):
+            cr.set_source_rgba(rgba.red, rgba.green, rgba.blue, rgba.alpha)
+        else:
+            cr.set_source_rgb(0.2, 0.5, 0.8) # Fallback blue
+            
+        # Draw circle
+        radius = min(width, height) / 2
+        cr.arc(width / 2, height / 2, radius, 0, 2 * 3.14159)
+        cr.fill()
 
     def _add_subtask(self, text: str, completed: bool, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0) -> SubTaskRow:
         """Add a sub-task row."""
@@ -436,7 +496,7 @@ class GoalRow(Adw.ExpanderRow):
     def reorder_tasks(self) -> None:
         """Reorder subtask rows to show hierarchy and update indentation."""
         # This will remove all rows and re-add them in depth-first order
-        # We need to preserve the "Add Task" row at the bottom though.
+        # We need to preserve the "Add Task" row at the top.
         
         # 1. Identify hierarchy
         tasks_by_parent = {}
@@ -475,14 +535,16 @@ class GoalRow(Adw.ExpanderRow):
         for row in self._subtask_rows:
             self.remove(row)
         
-        # Re-add in order BEFORE the "Add Task" row
-        # Adw.ExpanderRow.add_row appends. So we need to remove "Add Task" row too and re-add it at the end.
+        # Re-add in order AFTER the "Add Task" row
+        # Adw.ExpanderRow.add_row appends. So we need to remove "Add Task" row too and re-add it at the top.
         self.remove(self._add_task_row)
         
+        # Add "Add Task" row first (at the top)
+        self.add_row(self._add_task_row)
+        
+        # Then add all task rows in order
         for row in ordered_rows:
             self.add_row(row)
-        
-        self.add_row(self._add_task_row)
         
         # Update our internal list to match the new order for next time
         self._subtask_rows = ordered_rows

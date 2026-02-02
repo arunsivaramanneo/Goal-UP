@@ -15,6 +15,7 @@ from summary_widget import GoalSummaryWidget
 from timeline_widget import TimelineWidget
 from notification_manager import NotificationManager
 from datetime import datetime, date
+import random
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -120,6 +121,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.goal_entry.set_placeholder_text("Add Goal")
         self.goal_entry.connect("activate", self._on_add_clicked)
         entry_box.append(self.goal_entry)
+
+        self.color_button = Gtk.ColorButton()
+        self.color_button.set_valign(Gtk.Align.CENTER)
+        self._set_random_color()
+        entry_box.append(self.color_button)
 
         add_button = Gtk.Button()
         add_button.set_icon_name("list-add-symbolic")
@@ -278,7 +284,8 @@ class MainWindow(Adw.ApplicationWindow):
                     "tasks": row.get_tasks(),
                     "created_at": row.created_at,
                     "end_date": row.end_date,
-                    "completion_date": getattr(row, "_completion_date", "")
+                    "completion_date": getattr(row, "_completion_date", ""),
+                    "color": row.color
                 })
             row = row.get_next_sibling()
         return goals
@@ -289,15 +296,26 @@ class MainWindow(Adw.ApplicationWindow):
         if not text:
             return
 
-        self._add_goal(text, "", False, [], None)
+        color = self.color_button.get_rgba().to_string()
+        self._add_goal(text, "", False, [], None, color=color)
         self.goal_entry.set_text("")
+        self._set_random_color()
         self._reorder_goals()
         self._save_goals()
         self._update_empty_state()
 
-    def _add_goal(self, title: str, description: str, completed: bool, tasks: list, created_at: str = None, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0) -> None:
+    def _set_random_color(self) -> None:
+        """Set a random color for the color button."""
+        rgba = Gdk.RGBA()
+        rgba.red = random.random()
+        rgba.green = random.random()
+        rgba.blue = random.random()
+        rgba.alpha = 1.0
+        self.color_button.set_rgba(rgba)
+
+    def _add_goal(self, title: str, description: str, completed: bool, tasks: list, created_at: str = None, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, color: str = None) -> None:
         """Add a new goal to the list."""
-        row = GoalRow(title, description, completed, tasks, created_at, end_date, id, parent_id, depth)
+        row = GoalRow(title, description, completed, tasks, created_at, end_date, id, parent_id, depth, color=color)
         row.connect("goal-changed", self._on_goal_changed)
         row.connect("goal-deleted", self._on_goal_deleted)
         row.connect("edit-requested", self._on_edit_requested)
@@ -334,13 +352,13 @@ class MainWindow(Adw.ApplicationWindow):
             if g["id"] != row.id and g["id"] not in descendants:
                 possible_parents.append((g["id"], g["title"]))
 
-        dialog = EditGoalDialog(row.goal_title, row.description, row.end_date, row.parent_id, possible_parents)
+        dialog = EditGoalDialog(row.goal_title, row.description, row.end_date, row.parent_id, row.color, possible_parents)
         dialog.connect("save", self._on_edit_save, row)
         dialog.present(self)
 
-    def _on_edit_save(self, dialog: EditGoalDialog, title: str, description: str, end_date: str, parent_id: str, row: GoalRow) -> None:
+    def _on_edit_save(self, dialog: EditGoalDialog, title: str, description: str, end_date: str, parent_id: str, color: str, row: GoalRow) -> None:
         """Handle save from edit dialog."""
-        row.update_details(title, description, end_date, parent_id)
+        row.update_details(title, description, end_date, parent_id, color)
         self._reorder_goals()
         self._save_goals()
 
@@ -364,7 +382,8 @@ class MainWindow(Adw.ApplicationWindow):
                 goal.get("end_date"),
                 goal.get("id"),
                 goal.get("parent_id", ""),
-                goal.get("depth", 0)
+                goal.get("depth", 0),
+                goal.get("color", None)
             )
             if goal.get("completion_date"):
                 row = self.goal_list.get_last_child()
@@ -389,7 +408,8 @@ class MainWindow(Adw.ApplicationWindow):
                     "tasks": row.get_tasks(),
                     "created_at": row.created_at,
                     "end_date": row.end_date,
-                    "completion_date": getattr(row, "_completion_date", "")
+                    "completion_date": getattr(row, "_completion_date", ""),
+                    "color": row.color
                 })
             row = row.get_next_sibling()
         save_tasks(goals)
@@ -456,7 +476,8 @@ class MainWindow(Adw.ApplicationWindow):
                     "completed": row.completed,
                     "end_date": row.end_date,
                     "completion_date": getattr(row, "_completion_date", ""),
-                    "tasks": row.get_tasks()
+                    "tasks": row.get_tasks(),
+                    "color": row.color
                 })
             row = row.get_next_sibling()
         self._update_summary_from_list(goals)
@@ -477,6 +498,13 @@ class MainWindow(Adw.ApplicationWindow):
             total_tasks += len(tasks)
             completed_tasks += sum(1 for t in tasks if t.get("completed", False))
             
+            # Get goal color
+            goal_color = (0.2, 0.5, 0.8) # Default blue
+            if goal.get("color"):
+                rgba = Gdk.RGBA()
+                if rgba.parse(goal["color"]):
+                    goal_color = (rgba.red, rgba.green, rgba.blue)
+
             # Upcoming Goal
             if not goal.get("completed", False) and goal.get("end_date"):
                 try:
@@ -488,14 +516,14 @@ class MainWindow(Adw.ApplicationWindow):
                             "type": "goal",
                             "text": goal["title"],
                             "days": days,
-                            "color": (1.0, 0.2, 0.2) # Red for overdue
+                            "color": goal_color # Use goal color even if overdue
                         })
                     else:
                         upcoming_events.append({
                             "type": "goal",
                             "text": goal["title"],
                             "days": days,
-                            "color": (0.2, 0.5, 0.8) # Blue
+                            "color": goal_color
                         })
                 except (ValueError, TypeError):
                     pass
@@ -512,14 +540,14 @@ class MainWindow(Adw.ApplicationWindow):
                                 "type": "task",
                                 "text": f"{goal['title']} : {task['text']}",
                                 "days": days,
-                                "color": (1.0, 0.2, 0.2) # Red for overdue
+                                "color": goal_color # Inherit goal color
                             })
                         else:
                             upcoming_events.append({
                                 "type": "task",
                                 "text": f"{goal['title']} : {task['text']}",
                                 "days": days,
-                                "color": (0.9, 0.4, 0.2) # Orange
+                                "color": goal_color # Inherit goal color
                             })
                     except (ValueError, TypeError):
                         pass
