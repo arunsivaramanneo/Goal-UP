@@ -5,14 +5,22 @@ from datetime import datetime, date
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, Gdk, GObject
+from gi.repository import Gtk, Adw, Gdk, GObject, GLib
 
 class TimelineRow(Adw.ActionRow):
     """A row in the timeline representing a specific event."""
-    def __init__(self, date_str: str, text: str, completed: bool):
+    def __init__(self, date_str: str, text: str, completed: bool, color: str = None, days_remaining: int = None):
         super().__init__()
+        # Ensure title is set; markup will override if needed
         self.set_title(text)
-        self.set_subtitle(date_str)
+        
+        subtitle = date_str
+        if not completed and days_remaining is not None:
+            if days_remaining < 0:
+                 subtitle += f" ({abs(days_remaining)}d overdue)"
+            else:
+                 subtitle += f" ({days_remaining}d left)"
+        self.set_subtitle(subtitle)
         
         if completed:
             check_icon = Gtk.Image.new_from_icon_name("object-select-symbolic")
@@ -22,6 +30,21 @@ class TimelineRow(Adw.ActionRow):
         else:
             bullet_icon = Gtk.Image.new_from_icon_name("non-starred-symbolic")
             self.add_prefix(bullet_icon)
+
+        if color and not completed:
+            # Parse the color string (e.g. rgb(..)) to Gdk.RGBA to get components
+            rgba = Gdk.RGBA()
+            if rgba.parse(color):
+                # Convert to hex for Pango
+                r = int(rgba.red * 255)
+                g = int(rgba.green * 255)
+                b = int(rgba.blue * 255)
+                hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                
+                escaped_text = GLib.markup_escape_text(text)
+                markup = f"<span foreground='{hex_color}'>{escaped_text}</span>"
+                self.set_title(markup)
+                self.set_use_markup(True)
 
 class TimelineWidget(Gtk.Box):
     """Widget that displays a vertical timeline of goals and tasks."""
@@ -70,18 +93,23 @@ class TimelineWidget(Gtk.Box):
         events = []
         current_year = date.today().year
         start_of_year = date(current_year, 1, 1)
+        today = date.today()
         
         for goal in goals:
+            color = goal.get("color")
             # Goal itself
             g_date_str = goal.get("completion_date") or goal.get("end_date")
             if g_date_str:
                 try:
                     ev_date = datetime.strptime(g_date_str, "%Y-%m-%d").date()
                     if ev_date >= start_of_year:
+                        days = (ev_date - today).days
                         events.append({
                             "date": ev_date,
                             "text": f"Goal: {goal['title']}",
-                            "completed": goal.get("completed", False)
+                            "completed": goal.get("completed", False),
+                            "color": color,
+                            "days": days
                         })
                 except (ValueError, TypeError):
                     pass
@@ -93,10 +121,13 @@ class TimelineWidget(Gtk.Box):
                     try:
                         ev_date = datetime.strptime(t_date_str, "%Y-%m-%d").date()
                         if ev_date >= start_of_year:
+                            days = (ev_date - today).days
                             events.append({
                                 "date": ev_date,
                                 "text": f"{goal['title']} : {task['text']}",
-                                "completed": task.get("completed", False)
+                                "completed": task.get("completed", False),
+                                "color": color, # Inherit goal color
+                                "days": days
                             })
                     except (ValueError, TypeError):
                         pass
@@ -108,5 +139,11 @@ class TimelineWidget(Gtk.Box):
             self.list_box.append(self._empty_label)
         else:
             for ev in events:
-                row = TimelineRow(ev["date"].strftime("%b %d"), ev["text"], ev["completed"])
+                row = TimelineRow(
+                    ev["date"].strftime("%b %d"), 
+                    ev["text"], 
+                    ev["completed"], 
+                    ev.get("color"),
+                    ev.get("days")
+                )
                 self.list_box.append(row)

@@ -50,6 +50,22 @@ class MainWindow(Adw.ApplicationWindow):
         header = Adw.HeaderBar()
         main_box.append(header)
 
+        # Primary Menu
+        menu_button = Gtk.MenuButton()
+        menu_button.set_icon_name("open-menu-symbolic")
+        header.pack_end(menu_button)
+
+        menu_model = Gio.Menu()
+        menu_button.set_menu_model(menu_model)
+
+        # About
+        menu_model.append("About Goal UP", "win.about")
+
+        # About Action
+        about_action = Gio.SimpleAction.new("about", None)
+        about_action.connect("activate", self._on_about_clicked)
+        self.add_action(about_action)
+
         # Data Menu
         data_menu = Gio.Menu()
         data_menu.append("Export to JSON (Backup)", "win.export-json")
@@ -164,6 +180,20 @@ class MainWindow(Adw.ApplicationWindow):
         """Check for events due today and notify."""
         goals = self._get_goals_data()
         self.notification_manager.check_upcoming_events(goals)
+
+    def _on_about_clicked(self, action: Gio.SimpleAction, parameter: GLib.Variant = None) -> None:
+        """Show the About dialog."""
+        about = Adw.AboutWindow()
+        about.set_application_name("Goal UP")
+        about.set_developer_name("Arun Sivaraman")
+        about.set_version("1.0")
+        about.set_copyright("© 2026 Arun Sivaraman")
+        about.set_website("https://github.com/arunsivaramanneo/Goal-UP")
+        about.set_issue_url("https://github.com/arunsivaramanneo/Goal-UP/issues")
+        about.set_license_type(Gtk.License.MIT_X11)
+        about.set_application_icon("goal-up")
+        about.set_transient_for(self)
+        about.present()
 
     def _on_export_ics_clicked(self, action: Gio.SimpleAction, parameter: GLib.Variant = None) -> None:
         """Handle export to ICS button click."""
@@ -490,73 +520,12 @@ class MainWindow(Adw.ApplicationWindow):
         total_tasks = 0
         completed_tasks = 0
         
-        upcoming_events = []
-        today = date.today()
-
         for goal in goals:
             tasks = goal.get("tasks", [])
             total_tasks += len(tasks)
             completed_tasks += sum(1 for t in tasks if t.get("completed", False))
-            
-            # Get goal color
-            goal_color = (0.2, 0.5, 0.8) # Default blue
-            if goal.get("color"):
-                rgba = Gdk.RGBA()
-                if rgba.parse(goal["color"]):
-                    goal_color = (rgba.red, rgba.green, rgba.blue)
 
-            # Upcoming Goal
-            if not goal.get("completed", False) and goal.get("end_date"):
-                try:
-                    end_date = datetime.strptime(goal["end_date"], "%Y-%m-%d").date()
-                    days = (end_date - today).days
-                    
-                    if days < 0:
-                        upcoming_events.append({
-                            "type": "goal",
-                            "text": goal["title"],
-                            "days": days,
-                            "color": goal_color # Use goal color even if overdue
-                        })
-                    else:
-                        upcoming_events.append({
-                            "type": "goal",
-                            "text": goal["title"],
-                            "days": days,
-                            "color": goal_color
-                        })
-                except (ValueError, TypeError):
-                    pass
-            
-            # Upcoming Tasks
-            for task in tasks:
-                if not task.get("completed", False) and task.get("end_date"):
-                    try:
-                        end_date = datetime.strptime(task["end_date"], "%Y-%m-%d").date()
-                        days = (end_date - today).days
-                        
-                        if days < 0:
-                            upcoming_events.append({
-                                "type": "task",
-                                "text": f"{goal['title']} : {task['text']}",
-                                "days": days,
-                                "color": goal_color # Inherit goal color
-                            })
-                        else:
-                            upcoming_events.append({
-                                "type": "task",
-                                "text": f"{goal['title']} : {task['text']}",
-                                "days": days,
-                                "color": goal_color # Inherit goal color
-                            })
-                    except (ValueError, TypeError):
-                        pass
-
-        # Sort: most overdue first (most negative), then soonest upcoming first
-        upcoming_events.sort(key=lambda x: x['days'])
-        top_4_events = upcoming_events[:4]
-
-        self.summary_widget.update_status(completed_goals, total_goals, completed_tasks, total_tasks, top_4_events)
+        self.summary_widget.update_status(completed_goals, total_goals, completed_tasks, total_tasks)
         self.timeline_widget.update_data(goals)
 
     def _update_empty_state(self) -> None:
