@@ -525,7 +525,7 @@ class MainWindow(Adw.ApplicationWindow):
             total_tasks += len(tasks)
             completed_tasks += sum(1 for t in tasks if t.get("completed", False))
 
-        self.summary_widget.update_status(completed_goals, total_goals, completed_tasks, total_tasks)
+        self.summary_widget.update_status(completed_goals, total_goals, completed_tasks, total_tasks, goals)
         self.timeline_widget.update_data(goals)
 
     def _update_empty_state(self) -> None:
