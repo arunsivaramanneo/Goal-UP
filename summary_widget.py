@@ -26,6 +26,9 @@ class GoalSummaryWidget(Gtk.DrawingArea):
         # Style context for colors
         self._style_context = self.get_style_context()
 
+        # Completed-task color for goal insets (shared across all goals)
+        self._goal_completed_color = (0.15, 0.68, 0.37)  # green, same as Tasks completed color by default
+
         # Track last-drawn slice geometry for hover tooltips
         self._last_goal_slices = []  # list of dicts: center_x, center_y, inner_r, outer_r, start, end, goal, task_count, completed_count, percent
         self._last_task_slices = []  # same structure for tasks pie
@@ -137,12 +140,15 @@ class GoalSummaryWidget(Gtk.DrawingArea):
     def _distance(self, cx: float, cy: float, x: float, y: float) -> float:
         return math.hypot(x - cx, y - cy)
 
-    def _on_pointer_enter(self, controller) -> None:
-        # ensure tooltip can appear
-        pass
+    def _on_pointer_enter(self, controller, x: float, y: float) -> None:
+        """Called when pointer enters; forward to motion handler to show tooltip immediately."""
+        try:
+            self._on_motion(controller, x, y)
+        except Exception:
+            pass
 
-    def _on_pointer_leave(self, controller) -> None:
-        # clear tooltip when leaving widget
+    def _on_pointer_leave(self, controller, *args) -> None:
+        """Clear tooltip when leaving widget."""
         try:
             self.set_tooltip_text(None)
         except Exception:
@@ -282,7 +288,15 @@ class GoalSummaryWidget(Gtk.DrawingArea):
                 if completed_count > 0 and task_count > 0:
                     goal_progress = completed_count / task_count
                     if goal_progress > 0:
-                        overlay_r, overlay_g, overlay_b, overlay_a, sr, sg, sb, sa = self._overlay_color(base_color)
+                        # Use shared completed color for inset instead of a tinted variant of the goal color
+                        overlay_r, overlay_g, overlay_b = self._goal_completed_color
+                        overlay_a = 0.95
+
+                        # Choose stroke color based on luminance of the overlay color for contrast
+                        if self._luminance((overlay_r, overlay_g, overlay_b)) > 0.75:
+                            sr, sg, sb, sa = 0.0, 0.0, 0.0, 0.6
+                        else:
+                            sr, sg, sb, sa = 1.0, 1.0, 1.0, 0.8
 
                         # Place overlay inside the ring (inset)
                         overlay_outer = radius * 0.9
@@ -307,9 +321,43 @@ class GoalSummaryWidget(Gtk.DrawingArea):
 
                 current_angle = end_angle
 
+        # Draw center completion indicator (donut hole)
+        # Compute overall goals completion % for center display
+        try:
+            pct_goals = int((self._completed_goals / self._total_goals) * 100) if self._total_goals > 0 else 0
+        except Exception:
+            pct_goals = 0
+
+        # Pick a contrasting center fill based on current text color
+        fg_color = self._style_context.get_color()
+        fg_lum = 0.2126 * fg_color.red + 0.7152 * fg_color.green + 0.0722 * fg_color.blue
+        if fg_lum > 0.5:
+            # light text => dark center
+            cr.set_source_rgba(0.0, 0.0, 0.0, 0.75)
+        else:
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.95)
+
+        # inner_r was defined when drawing donut; use it and inset slightly
+        center_inner = inner_r - 6
+        if center_inner < 8:
+            center_inner = inner_r * 0.8
+
+        cr.new_path()
+        cr.arc(center_x, center_y, center_inner, 0, 2 * math.pi)
+        cr.fill()
+
+        # Draw percentage text on top of the center circle
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(18)
+        # Use theme foreground for text (contrasts with chosen center background)
+        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
+        pct_text = f"{pct_goals}%"
+        (tx, ty, tw, th, dx, dy) = cr.text_extents(pct_text)
+        cr.move_to(center_x - tw / 2 - tx, center_y + th / 2 - ty)
+        cr.show_text(pct_text)
+
         # Label (below)
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        fg_color = self._style_context.get_color()
         cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
 
         full_label = f"{label}: {self._completed_goals}/{self._total_goals}"  # Keep the "Goals: X/Y" text for context
@@ -417,9 +465,38 @@ class GoalSummaryWidget(Gtk.DrawingArea):
             })
 
 
+        # Draw center completion indicator (donut hole for tasks)
+        try:
+            pct_tasks = int(percent_complete * 100)
+        except Exception:
+            pct_tasks = 0
+
+        fg_color = self._style_context.get_color()
+        fg_lum = 0.2126 * fg_color.red + 0.7152 * fg_color.green + 0.0722 * fg_color.blue
+        if fg_lum > 0.5:
+            cr.set_source_rgba(0.0, 0.0, 0.0, 0.75)
+        else:
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.95)
+
+        center_inner = inner_r - 6
+        if center_inner < 8:
+            center_inner = inner_r * 0.8
+
+        cr.new_path()
+        cr.arc(center_x, center_y, center_inner, 0, 2 * math.pi)
+        cr.fill()
+
+        # Percentage text
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(18)
+        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
+        pct_text = f"{pct_tasks}%"
+        (tx, ty, tw, th, dx, dy) = cr.text_extents(pct_text)
+        cr.move_to(center_x - tw / 2 - tx, center_y + th / 2 - ty)
+        cr.show_text(pct_text)
+
         # 3. Label and Count (below)
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        fg_color = self._style_context.get_color()
         cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
         
         full_label = f"{label}: {completed}/{total}"

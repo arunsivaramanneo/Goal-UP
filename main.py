@@ -18,7 +18,7 @@ class GoalUpApplication(Adw.Application):
 
     def __init__(self):
         super().__init__(
-            application_id="com.example.GoalUp",
+            application_id="io.github.arunsivaramanneo.GoalUp",
             flags=Gio.ApplicationFlags.DEFAULT_FLAGS,
         )
 

@@ -23,13 +23,22 @@ echo "Installing icon..."
 cp icon.png "$ICON_DIR/goal-up.png"
 cp icon.png "$INSTALL_DIR/icon.png" # Fallback for local search path
 
+# Update icon cache so desktop environments pick up the new icon immediately
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  echo "Updating icon cache..."
+  # ICON_DIR is .../hicolor/128x128/apps, so go up two levels to .../hicolor
+  gtk-update-icon-cache -f -t "$(dirname "$(dirname "$ICON_DIR")")" || true
+fi
+
 # Copy desktop file
 echo "Installing desktop entry..."
 cp goal-up.desktop "$APP_DIR/"
 
-# Update desktop database
-echo "Updating desktop database..."
-update-desktop-database "$APP_DIR"
+# Update desktop database if available
+if command -v update-desktop-database >/dev/null 2>&1; then
+  echo "Updating desktop database..."
+  update-desktop-database "$APP_DIR" || true
+fi
 
 # Create executable wrapper
 echo "Creating executable..."

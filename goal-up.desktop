@@ -1,8 +1,10 @@
 [Desktop Entry]
+Type=Application
+Version=1.5
 Name=Goal UP
-Comment=A To Do List application
+Comment=A Simple To Do List application
 Exec=goal-up
-Icon=goal-up
+Icon=icon
 Terminal=false
 Type=Application
 Categories=Utility;GTK;
