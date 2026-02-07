@@ -522,11 +522,11 @@ class GoalSummaryWidget(Gtk.DrawingArea):
             # No data to display
             return
 
-        # Get the last 6 months of data
-        months = list(monthly_data.keys())[-6:]
+        # Get the first (oldest) 6 months of data
+        months = list(monthly_data.keys())[:6]
         max_total = max([monthly_data[m].get('total', 0) for m in months], default=1)
         max_completed = max([monthly_data[m].get('completed', 0) for m in months], default=0)
-        # Use the larger of total/completed for scaling
+        # Use the larger of total/completed for scaling (so bars reflect totals and completed portion)
         scale_max = max(max_total, max_completed, 1)
         
         # Draw title
@@ -539,104 +539,140 @@ class GoalSummaryWidget(Gtk.DrawingArea):
         title_x = x + width / 2 - tw / 2 - tx  # Center the title
         cr.move_to(title_x, y - 10)
         cr.show_text(title_text)
-        
-        # Chart area and axes
-        axis_x = x + 40
-        axis_y = y + height - 30
-        chart_width = width - 60
-        chart_height = height - 60
 
-        # Draw Y axis
+        # Chart area and axes (horizontal bars: months on Y axis)
+        axis_x = x + 80  # leave space for month labels on the left
+        axis_y = y + 20
+        chart_width = width - (axis_x - x) - 20
+        chart_height = height - 40
+
+        # Draw vertical Y axis (left)
         cr.set_line_width(1)
         cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.5)
         cr.move_to(axis_x, axis_y)
-        cr.line_to(axis_x, y + 10)
+        cr.line_to(axis_x, axis_y + chart_height)
         cr.stroke()
 
-        # Draw X axis
-        cr.move_to(axis_x, axis_y)
-        cr.line_to(axis_x + chart_width, axis_y)
+        # Draw horizontal zero/axis line at left (optional visual)
+        cr.move_to(axis_x, axis_y + chart_height)
+        cr.line_to(axis_x + chart_width, axis_y + chart_height)
         cr.stroke()
 
-        # Draw bars (single completed bar per month)
+        # Draw bars (horizontal combined bars)
         if len(months) > 0:
-            bar_width = chart_width / len(months) * 0.7
-            bar_spacing = chart_width / len(months)
+            bar_height = chart_height / len(months) * 0.7
+            bar_spacing = chart_height / len(months)
 
             for i, month_key in enumerate(months):
                 month_data = monthly_data[month_key]
-                completed = month_data['completed']
+                completed = month_data.get('completed', 0)
+                total = month_data.get('total', 0)
 
-                # Calculate bar height
-                if max_completed > 0:
-                    bar_height = (completed / max_completed) * (chart_height - 20)
-                else:
-                    bar_height = 0
+                # Calculate widths based on scale_max
+                total_width = (total / scale_max) * (chart_width - 10)
+                completed_width = (completed / scale_max) * (chart_width - 10) if scale_max > 0 else 0
 
-                # Draw bar
-                bar_x = axis_x + i * bar_spacing + (bar_spacing - bar_width) / 2
-                bar_y = axis_y - bar_height
+                # Positioning
+                bar_y = axis_y + i * bar_spacing + (bar_spacing - bar_height) / 2
+                bar_x = axis_x
 
-                # Green bar for completed
-                cr.set_source_rgb(0.15, 0.68, 0.37)
-                cr.rectangle(bar_x, bar_y, bar_width, bar_height)
+                # Draw total background bar (light gray)
+                cr.set_source_rgba(0.85, 0.85, 0.85, 0.9)
+                cr.rectangle(bar_x, bar_y, total_width, bar_height)
                 cr.fill()
 
-                # Draw month label
-                cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.7)
+                # Draw completed portion on top (green)
+                cr.set_source_rgb(0.15, 0.68, 0.37)
+                cr.rectangle(bar_x, bar_y, completed_width, bar_height)
+                cr.fill()
+
+                # Draw month label on the left
+                cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.9)
                 cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
                 cr.set_font_size(10)
-                # Format month key "2026-02" as "Feb 26"
                 try:
                     date_obj = datetime.strptime(month_key, '%Y-%m')
-                    month_str = date_obj.strftime('%b %y')  # e.g., "Feb 26"
+                    month_str = date_obj.strftime('%b %y')
                 except (ValueError, AttributeError):
                     month_str = month_key
                 (tx, ty, tw, th, dx, dy) = cr.text_extents(month_str)
-                cr.move_to(bar_x + bar_width / 2 - tw / 2 - tx, axis_y + 15)
+                label_x = axis_x - 8 - tw - tx
+                label_y = bar_y + bar_height / 2 + th / 2 - ty
+                cr.move_to(label_x, label_y)
                 cr.show_text(month_str)
 
-                # Draw value on top of bar
-                if completed > 0:
-                    cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
-                    cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-                    cr.set_font_size(9)
-                    val_str = str(int(completed))
-                    (tx, ty, tw, th, dx, dy) = cr.text_extents(val_str)
-                    cr.move_to(bar_x + bar_width / 2 - tw / 2 - tx, bar_y - 5)
-                    cr.show_text(val_str)
+                # Draw value label as completed/total to the right of the bar
+                val_str = f"{int(completed)}/{int(total)}"
+                cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
+                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+                cr.set_font_size(9)
+                (tx, ty, tw, th, dx, dy) = cr.text_extents(val_str)
+                val_x = axis_x + max(total_width, completed_width) + 6
+                val_y = bar_y + bar_height / 2 + th / 2 - ty
+                cr.move_to(val_x, val_y)
+                cr.show_text(val_str)
 
     def _calculate_monthly_data(self) -> dict:
         """Calculate monthly completion data from goals.
         
         Returns a dict with keys as "YYYY-MM" and values as dicts with 'completed' count.
         """
-        monthly = defaultdict(lambda: {'completed': 0})
-        
+        # Track both completed and total (items due/completed in that month)
+        monthly = defaultdict(lambda: {'completed': 0, 'total': 0})
+
         for goal in self._goals:
+            # Goal completion or end date counts towards the month
             completion_date_str = goal.get('completion_date', '')
+            end_date_str = goal.get('end_date', '')
+
+            # If goal was completed, count as completed and total in its completion month
             if completion_date_str:
                 try:
-                    # Parse completion date
                     comp_date = datetime.strptime(completion_date_str, '%Y-%m-%d').date()
                     month_key = comp_date.strftime('%Y-%m')
                     monthly[month_key]['completed'] += 1
+                    monthly[month_key]['total'] += 1
                 except (ValueError, AttributeError):
                     pass
-            
-            # Also count completed tasks
+            # If goal wasn't completed but has an end date, count it as total for the end month
+            elif end_date_str:
+                try:
+                    end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                    month_key = end_date.strftime('%Y-%m')
+                    monthly[month_key]['total'] += 1
+                except (ValueError, AttributeError):
+                    pass
+
+            # Also count tasks: completed tasks increment completed+total; tasks with end_date increment total
             for task in goal.get('tasks', []):
-                if task.get('completed', False):
-                    # Try to get task completion date, or use goal's completion date
-                    task_date_str = task.get('completion_date', completion_date_str)
-                    if task_date_str:
+                task_completed = task.get('completed', False)
+                # Prefer task completion date, fall back to task end_date or goal's dates
+                task_comp_str = task.get('completion_date') or ''
+                task_end_str = task.get('end_date') or ''
+
+                if task_completed:
+                    # Determine a date for the completed task (completion_date preferred, else end_date)
+                    date_str = task_comp_str or task_end_str or completion_date_str or end_date_str
+                    if date_str:
                         try:
-                            task_date = datetime.strptime(task_date_str, '%Y-%m-%d').date()
-                            month_key = task_date.strftime('%Y-%m')
+                            dt = datetime.strptime(date_str, '%Y-%m-%d').date()
+                            month_key = dt.strftime('%Y-%m')
                             monthly[month_key]['completed'] += 1
+                            monthly[month_key]['total'] += 1
                         except (ValueError, AttributeError):
                             pass
-        
+                else:
+                    # Not completed; if there's an end date, count as total for that month
+                    date_str = task_end_str or end_date_str
+                    if date_str:
+                        try:
+                            dt = datetime.strptime(date_str, '%Y-%m-%d').date()
+                            month_key = dt.strftime('%Y-%m')
+                            monthly[month_key]['total'] += 1
+                        except (ValueError, AttributeError):
+                            pass
+
+        # Return sorted dict by month key
         return dict(sorted(monthly.items()))
 
     def _draw_slice_text(self, cr: cairo.Context, x: float, y: float, text: str) -> None:

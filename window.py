@@ -25,7 +25,7 @@ class MainWindow(Adw.ApplicationWindow):
         super().__init__(application=app)
 
         self.set_title("Goal UP")
-        self.set_default_size(1080, 850)
+        self.set_default_size(1200, 850)
         
         # Set icon
         icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
