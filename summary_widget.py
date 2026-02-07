@@ -11,31 +11,26 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gtk, Gdk, GObject
 
-class GoalSummaryWidget(Gtk.DrawingArea):
-    """Widget that draws a circular progress summary of goals."""
+class GoalPieChartsWidget(Gtk.DrawingArea):
+    """Widget that draws the pie charts for goals and tasks."""
 
     def __init__(self):
         super().__init__()
         self.set_content_width(450)
-        self.set_content_height(950)
+        self.set_content_height(250)
         self.set_draw_func(self._draw_func)
         
         self._completed_goals = 0
         self._total_goals = 0
         self._completed_tasks = 0
         self._total_tasks = 0
+        self._goals = []
         
-        # Style context for colors
         self._style_context = self.get_style_context()
+        self._goal_completed_color = (0.15, 0.68, 0.37)
+        self._last_goal_slices = []
+        self._last_task_slices = []
 
-        # Completed-task color for goal insets (shared across all goals)
-        self._goal_completed_color = (0.15, 0.68, 0.37)  # green, same as Tasks completed color by default
-
-        # Track last-drawn slice geometry for hover tooltips
-        self._last_goal_slices = []  # list of dicts: center_x, center_y, inner_r, outer_r, start, end, goal, task_count, completed_count, percent
-        self._last_task_slices = []  # same structure for tasks pie
-
-        # Motion controller for hover tooltips
         self._motion = Gtk.EventControllerMotion()
         self._motion.connect("motion", self._on_motion)
         self._motion.connect("enter", self._on_pointer_enter)
@@ -43,645 +38,241 @@ class GoalSummaryWidget(Gtk.DrawingArea):
         self.add_controller(self._motion)
         self.set_has_tooltip(True)
 
-    def update_status(self, completed_goals: int, total_goals: int, completed_tasks: int, total_tasks: int, goals: list = None) -> None:
-        """Update the progress status."""
+    def update_data(self, completed_goals, total_goals, completed_tasks, total_tasks, goals):
         self._completed_goals = completed_goals
         self._total_goals = total_goals
         self._completed_tasks = completed_tasks
         self._total_tasks = total_tasks
-        self._goals = goals or []
+        self._goals = goals
         self.queue_draw()
 
-    def _draw_func(self, area, cr: cairo.Context, width: int, height: int) -> None:
-        """Draw the progress chart."""
-        # Split into three areas: pie charts and bar chart
-        center_x = width / 2
-        top_center_y = height * 0.15
-        bottom_pie_y = height * 0.45
+    def _draw_func(self, area, cr, width, height):
+        # Draw two pie charts side-by-side
+        left_x = width * 0.25
+        right_x = width * 0.75
+        center_y = height * 0.45
+        radius = min(width * 0.2, height * 0.4)
         
-        pie_radius = 100
-        
-        # Calculate total tasks across all goals (denominator for left chart)
-        total_tasks_all_goals = 0
-        for g in self._goals:
-             total_tasks_all_goals += len(g.get("tasks", []))
+        total_tasks_all_goals = sum(len(g.get("tasks", [])) for g in self._goals)
 
-        # Draw Goals Pie Chart (Top)
-        self._draw_goals_pie(cr, center_x, top_center_y, pie_radius, 
-                             self._goals, total_tasks_all_goals, "Goals")
-
-        # Draw Tasks Pie Chart (Below goals)
-        self._draw_pie(cr, center_x, bottom_pie_y, pie_radius, 
-                       self._completed_tasks, self._total_tasks, 
+        self._draw_goals_pie(cr, left_x, center_y, radius, self._goals, total_tasks_all_goals, "Goals")
+        self._draw_pie(cr, right_x, center_y, radius, self._completed_tasks, self._total_tasks, 
                        (0.15, 0.68, 0.37), (0.9, 0.4, 0.2), "Tasks")
 
-        # Draw Monthly Bar Chart (Bottom)
-        bar_chart_y = height * 0.65
-        bar_chart_height = height * 0.35
-        bar_chart_x = 20
-        bar_chart_width = width - 40
-        self._draw_monthly_bar_chart(cr, bar_chart_x, bar_chart_y, bar_chart_width, bar_chart_height)
-
-    def _parse_color(self, color_str: str) -> tuple:
-        """Parse a CSS color string into a (r, g, b) tuple scaled 0.0-1.0.
-
-        Supports formats produced by the color picker (e.g. "rgb(r,g,b)" or "rgba(r,g,b,a)"),
-        hex strings ("#rrggbb"), named colors and anything that Gdk.RGBA.parse() accepts.
-        If values are in 0-255 range they will be normalized to 0-1 for Cairo.
-        """
-        if not color_str:
-            return (0.5, 0.5, 0.5)  # Default Gray
-
+    def _parse_color(self, color_str):
+        if not color_str: return (0.5, 0.5, 0.5)
         color_str = color_str.strip()
-
-        # Handle 'rgb(r,g,b)' and 'rgba(r,g,b,a)'
         if (color_str.startswith("rgb(") or color_str.startswith("rgba(")) and color_str.endswith(")"):
             try:
                 inside = color_str[color_str.find("(") + 1: color_str.rfind(")")]
                 parts = [p.strip() for p in inside.split(",")]
                 if len(parts) >= 3:
-                    r = float(parts[0])
-                    g = float(parts[1])
-                    b = float(parts[2])
-
-                    def norm(v: float) -> float:
-                        # If value seems like 0-255 integers, normalize; else assume already 0-1
-                        if v > 1.0:
-                            return max(0.0, min(1.0, v / 255.0))
-                        return max(0.0, min(1.0, v))
-
+                    r, g, b = float(parts[0]), float(parts[1]), float(parts[2])
+                    def norm(v): return max(0.0, min(1.0, v / 255.0)) if v > 1.0 else max(0.0, min(1.0, v))
                     return (norm(r), norm(g), norm(b))
-            except Exception:
-                return (0.5, 0.5, 0.5)
-
-        # Fallback to Gdk.RGBA parsing (handles hex and named colors)
+            except: pass
         c = Gdk.RGBA()
-        if c.parse(color_str):
-            return (c.red, c.green, c.blue)
-
+        if c.parse(color_str): return (c.red, c.green, c.blue)
         return (0.5, 0.5, 0.5)
 
-    def _luminance(self, rgb: tuple) -> float:
-        """Return perceived luminance of an RGB tuple (0..1)."""
-        r, g, b = rgb
-        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    def _luminance(self, rgb):
+        return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
 
-    def _point_angle(self, cx: float, cy: float, x: float, y: float) -> float:
-        """Return angle in radians from center to point, normalized 0..2pi."""
+    def _point_angle(self, cx, cy, x, y):
         ang = math.atan2(y - cy, x - cx)
-        if ang < 0:
-            ang += 2 * math.pi
-        return ang
+        return ang + 2 * math.pi if ang < 0 else ang
 
-    def _angle_in_range(self, angle: float, start: float, end: float) -> bool:
-        """Return True if angle is within the start..end arc (angles in 0..2pi), handling wrap."""
-        # Normalize to 0..2pi
-        s = start % (2 * math.pi)
-        e = end % (2 * math.pi)
-        a = angle % (2 * math.pi)
-        if s <= e:
-            return s <= a <= e
-        else:
-            # wrapped around 2pi
-            return a >= s or a <= e
+    def _angle_in_range(self, angle, start, end):
+        s, e, a = start % (2 * math.pi), end % (2 * math.pi), angle % (2 * math.pi)
+        return s <= a <= e if s <= e else a >= s or a <= e
 
-    def _distance(self, cx: float, cy: float, x: float, y: float) -> float:
+    def _distance(self, cx, cy, x, y):
         return math.hypot(x - cx, y - cy)
 
-    def _on_pointer_enter(self, controller, x: float, y: float) -> None:
-        """Called when pointer enters; forward to motion handler to show tooltip immediately."""
-        try:
-            self._on_motion(controller, x, y)
-        except Exception:
-            pass
+    def _on_pointer_enter(self, ctrl, x, y): self._on_motion(ctrl, x, y)
+    def _on_pointer_leave(self, ctrl, *args): self.set_tooltip_text(None)
 
-    def _on_pointer_leave(self, controller, *args) -> None:
-        """Clear tooltip when leaving widget."""
-        try:
-            self.set_tooltip_text(None)
-        except Exception:
-            pass
-
-    def _on_motion(self, controller, x: float, y: float) -> None:
-        """Handle motion events over the drawing area and show contextual tooltips."""
-        # First check goals slices
-        for s in getattr(self, "_last_goal_slices", []):
-            d = self._distance(s["center_x"], s["center_y"], x, y)
-            if s["inner_r"] <= d <= s["outer_r"]:
+    def _on_motion(self, ctrl, x, y):
+        for s in self._last_goal_slices:
+            if s["inner_r"] <= self._distance(s["center_x"], s["center_y"], x, y) <= s["outer_r"]:
                 ang = self._point_angle(s["center_x"], s["center_y"], x, y)
                 if self._angle_in_range(ang, s["start"], s["end"]):
-                    g = s.get("goal")
-                    task_count = s.get("task_count", 0)
-                    completed = s.get("completed_count", 0)
-                    pct_goal = int((completed / task_count) * 100) if task_count > 0 else 0
-                    pct_share = int(s.get("percent", 0) * 100)
-                    title = g.get("title", g.get("text", "Untitled")) if g else "Goal"
-                    tooltip = f"{title}\nTasks: {completed}/{task_count} ({pct_goal}% complete)\nShare of total: {pct_share}%"
-                    self.set_tooltip_text(tooltip)
+                    g, tc, cc = s["goal"], s["task_count"], s["completed_count"]
+                    pg = int((cc / tc) * 100) if tc > 0 else 0
+                    ps = int(s["percent"] * 100)
+                    title = g.get("title", g.get("text", "Untitled"))
+                    self.set_tooltip_text(f"{title}\nTasks: {cc}/{tc} ({pg}% complete)\nShare: {ps}%")
                     return
-        # Then check task pie slices
-        for s in getattr(self, "_last_task_slices", []):
-            d = self._distance(s["center_x"], s["center_y"], x, y)
-            if s["inner_r"] <= d <= s["outer_r"]:
+        for s in self._last_task_slices:
+            if s["inner_r"] <= self._distance(s["center_x"], s["center_y"], x, y) <= s["outer_r"]:
                 ang = self._point_angle(s["center_x"], s["center_y"], x, y)
                 if self._angle_in_range(ang, s["start"], s["end"]):
-                    kind = s.get("kind")
-                    val = s.get("value")
-                    total = s.get("total")
-                    pct = int((val / total) * 100) if total > 0 else 0
-                    if kind == "completed":
-                        tooltip = f"Completed: {val}/{total} ({pct}%)"
-                    else:
-                        tooltip = f"Remaining: {val}/{total} ({pct}%)"
-                    self.set_tooltip_text(tooltip)
+                    k, v, t = s["kind"], s["value"], s["total"]
+                    p = int((v / t) * 100) if t > 0 else 0
+                    self.set_tooltip_text(f"{k.capitalize()}: {v}/{t} ({p}%)")
                     return
-        # If nothing found, clear tooltip
-        try:
-            self.set_tooltip_text(None)
-        except Exception:
-            pass
+        self.set_tooltip_text(None)
 
-    def _overlay_color(self, rgb: tuple) -> tuple:
-        """Generate an overlay (lighter) RGBA color and a contrasting stroke color.
-
-        Returns (r, g, b, a, stroke_r, stroke_g, stroke_b, stroke_a)
-        """
-        r, g, b = rgb
-        # Mix with white to get a light, pastel overlay
-        def mix_with_white(c, f=0.6):
-            return max(0.0, min(1.0, c * (1 - f) + 1.0 * f))
-
-        or_, og, ob = mix_with_white(r), mix_with_white(g), mix_with_white(b)
-        oa = 0.9
-
-        # Choose stroke color (contrast with overlay brightness)
-        avg = (or_ + og + ob) / 3.0
-        if avg > 0.75:
-            # overlay is very light, use semi-transparent black for stroke
-            sr, sg, sb, sa = 0.0, 0.0, 0.0, 0.6
-        else:
-            # overlay is mid/dark, use semi-transparent white
-            sr, sg, sb, sa = 1.0, 1.0, 1.0, 0.8
-
-        return (or_, og, ob, oa, sr, sg, sb, sa)
-
-    def _draw_goals_pie(self, cr: cairo.Context, center_x: float, center_y: float, radius: float, 
-                        goals: list, total_tasks: int, label: str) -> None:
-        """Draw the goals pie chart based on task distribution."""
-        
+    def _draw_goals_pie(self, cr, center_x, center_y, radius, goals, total_tasks, label):
         start_angle = -math.pi / 2
-        
-        # If no tasks at all, draw a placeholder donut
+        inner_r = radius * 0.5
         if total_tasks == 0:
-            outer_r = radius
-            inner_r = radius * 0.5
-            cr.new_path()
-            cr.arc(center_x, center_y, outer_r, 0, 2 * math.pi)
-            cr.arc(center_x, center_y, inner_r, 2 * math.pi, 0)
-            cr.close_path()
-            cr.set_source_rgb(0.85, 0.85, 0.85)  # Light gray donut
-            cr.fill()
+            cr.new_path(); cr.arc(center_x, center_y, radius, 0, 2 * math.pi)
+            cr.arc(center_x, center_y, inner_r, 2 * math.pi, 0); cr.close_path()
+            cr.set_source_rgb(0.85, 0.85, 0.85); cr.fill()
         else:
-            # reset previous geometry
             self._last_goal_slices = []
             current_angle = start_angle
             for goal in goals:
                 task_count = len(goal.get("tasks", []))
-                if task_count == 0:
-                    continue
-
+                if task_count == 0: continue
                 percent = task_count / total_tasks
                 angle_span = percent * 2 * math.pi
                 end_angle = current_angle + angle_span
-
-                # Get Color
                 base_color = self._parse_color(goal.get("color", ""))
-
-                # Draw donut slice (outer arc and inner arc reversed)
-                outer_r = radius
-                inner_r = radius * 0.5
-
-                cr.new_path()
-                cr.arc(center_x, center_y, outer_r, current_angle, end_angle)
-                cr.arc(center_x, center_y, inner_r, end_angle, current_angle)
-                cr.close_path()
-
-                cr.set_source_rgb(*base_color)
-                cr.fill_preserve()
-
-                # store geometry for hover
+                cr.new_path(); cr.arc(center_x, center_y, radius, current_angle, end_angle)
+                cr.arc(center_x, center_y, inner_r, end_angle, current_angle); cr.close_path()
+                cr.set_source_rgb(*base_color); cr.fill_preserve()
                 self._last_goal_slices.append({
-                    "center_x": center_x,
-                    "center_y": center_y,
-                    "outer_r": outer_r,
-                    "inner_r": inner_r,
-                    "start": current_angle,
-                    "end": end_angle,
-                    "goal": goal,
-                    "task_count": task_count,
-                    "completed_count": sum(1 for t in goal.get("tasks", []) if t.get("completed", False)),
-                    "percent": percent
+                    "center_x": center_x, "center_y": center_y, "outer_r": radius, "inner_r": inner_r,
+                    "start": current_angle, "end": end_angle, "goal": goal, "task_count": task_count,
+                    "completed_count": sum(1 for t in goal.get("tasks", []) if t.get("completed")), "percent": percent
                 })
-                # Subtle stroke to separate slices
                 cr.set_line_width(0.8)
-                # use translucent white or black depending on luminance to give separation in both themes
-                if self._luminance(base_color) > 0.6:
-                    cr.set_source_rgba(0, 0, 0, 0.15)
-                else:
-                    cr.set_source_rgba(1, 1, 1, 0.12)
+                cr.set_source_rgba(0, 0, 0, 0.15) if self._luminance(base_color) > 0.6 else cr.set_source_rgba(1, 1, 1, 0.12)
                 cr.stroke()
-
-                # Draw completed progress INSIDE the slice as an inset ring if some tasks are completed
-                completed_count = sum(1 for t in goal.get("tasks", []) if t.get("completed", False))
-                if completed_count > 0 and task_count > 0:
-                    goal_progress = completed_count / task_count
-                    if goal_progress > 0:
-                        # Use shared completed color for inset instead of a tinted variant of the goal color
-                        overlay_r, overlay_g, overlay_b = self._goal_completed_color
-                        overlay_a = 0.95
-
-                        # Choose stroke color based on luminance of the overlay color for contrast
-                        if self._luminance((overlay_r, overlay_g, overlay_b)) > 0.75:
-                            sr, sg, sb, sa = 0.0, 0.0, 0.0, 0.6
-                        else:
-                            sr, sg, sb, sa = 1.0, 1.0, 1.0, 0.8
-
-                        # Place overlay inside the ring (inset)
-                        overlay_outer = radius * 0.9
-                        overlay_inner = radius * 0.55
-
-                        start = current_angle
-                        end_overlay = current_angle + angle_span * goal_progress
-
-                        # Create ring segment path (outer arc then inner arc reversed)
-                        cr.new_path()
-                        cr.arc(center_x, center_y, overlay_outer, start, end_overlay)
-                        cr.arc(center_x, center_y, overlay_inner, end_overlay, start)
-                        cr.close_path()
-
-                        cr.set_source_rgba(overlay_r, overlay_g, overlay_b, overlay_a)
-                        cr.fill_preserve()
-
-                        # Stroke with contrasting color to make it visible on both light/dark backgrounds
-                        cr.set_line_width(1.0)
-                        cr.set_source_rgba(sr, sg, sb, sa)
-                        cr.stroke()
-
+                cc = sum(1 for t in goal.get("tasks", []) if t.get("completed"))
+                if cc > 0:
+                    gp = cc / task_count
+                    or_, og, ob = self._goal_completed_color
+                    sr, sg, sb, sa = (0,0,0,0.6) if self._luminance((or_, og, ob)) > 0.75 else (1,1,1,0.8)
+                    cr.new_path(); cr.arc(center_x, center_y, radius * 0.9, current_angle, current_angle + angle_span * gp)
+                    cr.arc(center_x, center_y, radius * 0.55, current_angle + angle_span * gp, current_angle); cr.close_path()
+                    cr.set_source_rgba(or_, og, ob, 0.95); cr.fill_preserve()
+                    cr.set_line_width(1.0); cr.set_source_rgba(sr, sg, sb, sa); cr.stroke()
                 current_angle = end_angle
 
-        # Draw center completion indicator (donut hole)
-        # Compute overall goals completion % for center display
-        try:
-            pct_goals = int((self._completed_goals / self._total_goals) * 100) if self._total_goals > 0 else 0
-        except Exception:
-            pct_goals = 0
+        p_goals = int((self._completed_goals / self._total_goals) * 100) if self._total_goals > 0 else 0
+        fg = self._style_context.get_color()
+        fgl = 0.2126 * fg.red + 0.7152 * fg.green + 0.0722 * fg.blue
+        cr.set_source_rgba(0,0,0,0.75) if fgl > 0.5 else cr.set_source_rgba(1,1,1,0.95)
+        cr.new_path(); cr.arc(center_x, center_y, inner_r - 6, 0, 2 * math.pi); cr.fill()
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(18)
+        cr.set_source_rgba(fg.red, fg.green, fg.blue, fg.alpha)
+        txt = f"{p_goals}%"; (tx, ty, tw, th, dx, dy) = cr.text_extents(txt)
+        cr.move_to(center_x - tw / 2 - tx, center_y + th / 2 - ty); cr.show_text(txt)
+        cr.set_font_size(16); lbl = f"{label}: {self._completed_goals}/{self._total_goals}"
+        (lx, ly, lw, lh, ldx, ldy) = cr.text_extents(lbl)
+        cr.move_to(center_x - lw / 2 - lx, center_y + radius + 30); cr.show_text(lbl)
 
-        # Pick a contrasting center fill based on current text color
-        fg_color = self._style_context.get_color()
-        fg_lum = 0.2126 * fg_color.red + 0.7152 * fg_color.green + 0.0722 * fg_color.blue
-        if fg_lum > 0.5:
-            # light text => dark center
-            cr.set_source_rgba(0.0, 0.0, 0.0, 0.75)
-        else:
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.95)
-
-        # inner_r was defined when drawing donut; use it and inset slightly
-        center_inner = inner_r - 6
-        if center_inner < 8:
-            center_inner = inner_r * 0.8
-
-        cr.new_path()
-        cr.arc(center_x, center_y, center_inner, 0, 2 * math.pi)
-        cr.fill()
-
-        # Draw percentage text on top of the center circle
-        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(18)
-        # Use theme foreground for text (contrasts with chosen center background)
-        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
-        pct_text = f"{pct_goals}%"
-        (tx, ty, tw, th, dx, dy) = cr.text_extents(pct_text)
-        cr.move_to(center_x - tw / 2 - tx, center_y + th / 2 - ty)
-        cr.show_text(pct_text)
-
-        # Label (below)
-        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
-
-        full_label = f"{label}: {self._completed_goals}/{self._total_goals}"  # Keep the "Goals: X/Y" text for context
-        cr.set_font_size(16)
-        (lx, ly, l_width, l_height, ldx, ldy) = cr.text_extents(full_label)
-        cr.move_to(center_x - l_width / 2 - lx, center_y + radius + 30)
-        cr.show_text(full_label)
-
-        # Label (below)
-        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        fg_color = self._style_context.get_color()
-        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
-        
-        full_label = f"{label}: {self._completed_goals}/{self._total_goals}" # Keep the "Goals: X/Y" text for context
-        cr.set_font_size(16)
-        (lx, ly, l_width, l_height, ldx, ldy) = cr.text_extents(full_label)
-        cr.move_to(center_x - l_width / 2 - lx, center_y + radius + 30)
-        cr.show_text(full_label)
-
-    def _draw_pie(self, cr: cairo.Context, center_x: float, center_y: float, radius: float, 
-                  completed: int, total: int, completed_color: tuple, remaining_color: tuple, label: str) -> None:
-        """Draw a single pie chart with legend."""
-        
-        # Calculate Percentage
-        if total > 0:
-            percent_complete = completed / total
-        else:
-            percent_complete = 0.0
-            
+    def _draw_pie(self, cr, center_x, center_y, radius, completed, total, completed_color, remaining_color, label):
+        pc = completed / total if total > 0 else 0.0
         start_angle = -math.pi / 2
-        
-        remaining_angle_span = (1.0 - percent_complete) * 2 * math.pi
-        completed_angle_span = percent_complete * 2 * math.pi
-        
-        split_angle = start_angle + completed_angle_span
-        
-        outer_r = radius
-        inner_r = radius * 0.5
-
-        # reset previous geometry
+        sa, inner_r = start_angle, radius * 0.5
         self._last_task_slices = []
-
-        # 1. Remaining Slice
-        if percent_complete < 1.0:
-            rem_start = split_angle
-            rem_end = start_angle + 2 * math.pi
-            cr.new_path()
-            cr.arc(center_x, center_y, outer_r, rem_start, rem_end)
-            cr.arc(center_x, center_y, inner_r, rem_end, rem_start)
-            cr.close_path()
-            cr.set_source_rgb(*remaining_color)
-            cr.fill_preserve()
-
-            # subtle stroke
-            cr.set_line_width(0.8)
-            if self._luminance(remaining_color) > 0.6:
-                cr.set_source_rgba(0, 0, 0, 0.12)
-            else:
-                cr.set_source_rgba(1, 1, 1, 0.12)
-            cr.stroke()
-
-            # store geometry
-            self._last_task_slices.append({
-                "center_x": center_x,
-                "center_y": center_y,
-                "outer_r": outer_r,
-                "inner_r": inner_r,
-                "start": rem_start,
-                "end": rem_end,
-                "kind": "remaining",
-                "value": int((1.0 - percent_complete) * total),
-                "total": total
-            })
-
-        # 2. Completed Slice
-        if percent_complete > 0:
-            comp_start = start_angle
-            comp_end = split_angle
-            cr.new_path()
-            cr.arc(center_x, center_y, outer_r, comp_start, comp_end)
-            cr.arc(center_x, center_y, inner_r, comp_end, comp_start)
-            cr.close_path()
-            cr.set_source_rgb(*completed_color)
-            cr.fill_preserve()
-
-            # subtle stroke
-            cr.set_line_width(0.8)
-            if self._luminance(completed_color) > 0.6:
-                cr.set_source_rgba(0, 0, 0, 0.12)
-            else:
-                cr.set_source_rgba(1, 1, 1, 0.12)
-            cr.stroke()
-
-            # store geometry
-            self._last_task_slices.append({
-                "center_x": center_x,
-                "center_y": center_y,
-                "outer_r": outer_r,
-                "inner_r": inner_r,
-                "start": comp_start,
-                "end": comp_end,
-                "kind": "completed",
-                "value": completed,
-                "total": total
-            })
+        if pc < 1.0:
+            rs, re = sa + pc * 2 * math.pi, sa + 2 * math.pi
+            cr.new_path(); cr.arc(center_x, center_y, radius, rs, re); cr.arc(center_x, center_y, inner_r, re, rs); cr.close_path()
+            cr.set_source_rgb(*remaining_color); cr.fill_preserve(); cr.set_line_width(0.8)
+            cr.set_source_rgba(0,0,0,0.12) if self._luminance(remaining_color) > 0.6 else cr.set_source_rgba(1,1,1,0.12); cr.stroke()
+            self._last_task_slices.append({"center_x": center_x, "center_y": center_y, "outer_r": radius, "inner_r": inner_r, "start": rs, "end": re, "kind": "remaining", "value": total - completed, "total": total})
+        if pc > 0:
+            cs, ce = sa, sa + pc * 2 * math.pi
+            cr.new_path(); cr.arc(center_x, center_y, radius, cs, ce); cr.arc(center_x, center_y, inner_r, ce, cs); cr.close_path()
+            cr.set_source_rgb(*completed_color); cr.fill_preserve(); cr.set_line_width(0.8)
+            cr.set_source_rgba(0,0,0,0.12) if self._luminance(completed_color) > 0.6 else cr.set_source_rgba(1,1,1,0.12); cr.stroke()
+            self._last_task_slices.append({"center_x": center_x, "center_y": center_y, "outer_r": radius, "inner_r": inner_r, "start": cs, "end": ce, "kind": "completed", "value": completed, "total": total})
+        fg = self._style_context.get_color()
+        fgl = 0.2126 * fg.red + 0.7152 * fg.green + 0.0722 * fg.blue
+        cr.set_source_rgba(0,0,0,0.75) if fgl > 0.5 else cr.set_source_rgba(1,1,1,0.95)
+        cr.new_path(); cr.arc(center_x, center_y, inner_r - 6, 0, 2 * math.pi); cr.fill()
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(18)
+        cr.set_source_rgba(fg.red, fg.green, fg.blue, fg.alpha)
+        txt = f"{int(pc*100)}%"; (tx, ty, tw, th, dx, dy) = cr.text_extents(txt)
+        cr.move_to(center_x - tw / 2 - tx, center_y + th / 2 - ty); cr.show_text(txt)
+        cr.set_font_size(16); lbl = f"{label}: {completed}/{total}"
+        (lx, ly, lw, lh, ldx, ldy) = cr.text_extents(lbl)
+        cr.move_to(center_x - lw / 2 - lx, center_y + radius + 30); cr.show_text(lbl)
 
 
-        # Draw center completion indicator (donut hole for tasks)
-        try:
-            pct_tasks = int(percent_complete * 100)
-        except Exception:
-            pct_tasks = 0
+class GoalTrendWidget(Gtk.DrawingArea):
+    """Widget that draws the monthly completion trend bar chart."""
 
-        fg_color = self._style_context.get_color()
-        fg_lum = 0.2126 * fg_color.red + 0.7152 * fg_color.green + 0.0722 * fg_color.blue
-        if fg_lum > 0.5:
-            cr.set_source_rgba(0.0, 0.0, 0.0, 0.75)
-        else:
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.95)
+    def __init__(self):
+        super().__init__()
+        self.set_content_width(300)
+        self.set_content_height(400)
+        self.set_draw_func(self._draw_func)
+        self._goals = []
+        self._style_context = self.get_style_context()
 
-        center_inner = inner_r - 6
-        if center_inner < 8:
-            center_inner = inner_r * 0.8
+    def update_data(self, goals):
+        self._goals = goals
+        self.queue_draw()
 
-        cr.new_path()
-        cr.arc(center_x, center_y, center_inner, 0, 2 * math.pi)
-        cr.fill()
+    def _draw_func(self, area, cr, width, height):
+        self._draw_monthly_bar_chart(cr, 10, 40, width - 20, height - 60)
 
-        # Percentage text
-        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(18)
-        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
-        pct_text = f"{pct_tasks}%"
-        (tx, ty, tw, th, dx, dy) = cr.text_extents(pct_text)
-        cr.move_to(center_x - tw / 2 - tx, center_y + th / 2 - ty)
-        cr.show_text(pct_text)
-
-        # 3. Label and Count (below)
-        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
-        
-        full_label = f"{label}: {completed}/{total}"
-        cr.set_font_size(16)
-        (lx, ly, l_width, l_height, ldx, ldy) = cr.text_extents(full_label)
-        cr.move_to(center_x - l_width / 2 - lx, center_y + radius + 30)
-        cr.show_text(full_label)
-
-    def _draw_monthly_bar_chart(self, cr: cairo.Context, x: float, y: float, width: float, height: float) -> None:
-        """Draw a bar chart showing monthly completion trends."""
-        # Calculate monthly data
+    def _draw_monthly_bar_chart(self, cr, x, y, width, height):
         monthly_data = self._calculate_monthly_data()
-        
-        if not monthly_data:
-            # No data to display
-            return
-
-        # Get the first (oldest) 6 months of data
+        if not monthly_data: return
         months = list(monthly_data.keys())[:6]
-        max_total = max([monthly_data[m].get('total', 0) for m in months], default=1)
-        max_completed = max([monthly_data[m].get('completed', 0) for m in months], default=0)
-        # Use the larger of total/completed for scaling (so bars reflect totals and completed portion)
-        scale_max = max(max_total, max_completed, 1)
-        
-        # Draw title
-        fg_color = self._style_context.get_color()
-        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
-        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-        cr.set_font_size(12)
-        title_text = "Monthly Completions"
-        (tx, ty, tw, th, dx, dy) = cr.text_extents(title_text)
-        title_x = x + width / 2 - tw / 2 - tx  # Center the title
-        cr.move_to(title_x, y - 10)
-        cr.show_text(title_text)
+        scale_max = max([max(d['total'], d['completed']) for d in monthly_data.values()] + [1])
+        fg = self._style_context.get_color()
+        cr.set_source_rgba(fg.red, fg.green, fg.blue, fg.alpha)
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL); cr.set_font_size(12)
+        txt = "Monthly Completions"; (tx, ty, tw, th, dx, dy) = cr.text_extents(txt)
+        cr.move_to(x + width/2 - tw/2 - tx, y - 10); cr.show_text(txt)
+        ax, ay, cw, ch = x + 60, y + 20, width - 80, height - 40
+        cr.set_line_width(1); cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.5)
+        cr.move_to(ax, ay); cr.line_to(ax, ay + ch); cr.line_to(ax + cw, ay + ch); cr.stroke()
+        if months:
+            bh, bs = (ch / len(months) * 0.7), (ch / len(months))
+            for i, mk in enumerate(months):
+                d = monthly_data[mk]; c, t = d['completed'], d['total']
+                tw, cw_ = (t / scale_max) * (cw - 10), (c / scale_max) * (cw - 10)
+                by = ay + i * bs + (bs - bh) / 2
+                cr.set_source_rgba(0.85, 0.85, 0.85, 0.9); cr.rectangle(ax, by, tw, bh); cr.fill()
+                cr.set_source_rgb(0.15, 0.68, 0.37); cr.rectangle(ax, by, cw_, bh); cr.fill()
+                cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.9); cr.set_font_size(10)
+                try: ms = datetime.strptime(mk, '%Y-%m').strftime('%b %y')
+                except: ms = mk
+                (tx, ty, tw_, th, dx, dy) = cr.text_extents(ms)
+                cr.move_to(ax - 8 - tw_ - tx, by + bh/2 + th/2 - ty); cr.show_text(ms)
+                vs = f"{int(c)}/{int(t)}"; cr.set_source_rgba(fg.red, fg.green, fg.blue, fg.alpha)
+                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(9)
+                (tx, ty, tw_, th, dx, dy) = cr.text_extents(vs)
+                cr.move_to(ax + max(tw, cw_) + 6, by + bh/2 + th/2 - ty); cr.show_text(vs)
 
-        # Chart area and axes (horizontal bars: months on Y axis)
-        axis_x = x + 80  # leave space for month labels on the left
-        axis_y = y + 20
-        chart_width = width - (axis_x - x) - 20
-        chart_height = height - 40
-
-        # Draw vertical Y axis (left)
-        cr.set_line_width(1)
-        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.5)
-        cr.move_to(axis_x, axis_y)
-        cr.line_to(axis_x, axis_y + chart_height)
-        cr.stroke()
-
-        # Draw horizontal zero/axis line at left (optional visual)
-        cr.move_to(axis_x, axis_y + chart_height)
-        cr.line_to(axis_x + chart_width, axis_y + chart_height)
-        cr.stroke()
-
-        # Draw bars (horizontal combined bars)
-        if len(months) > 0:
-            bar_height = chart_height / len(months) * 0.7
-            bar_spacing = chart_height / len(months)
-
-            for i, month_key in enumerate(months):
-                month_data = monthly_data[month_key]
-                completed = month_data.get('completed', 0)
-                total = month_data.get('total', 0)
-
-                # Calculate widths based on scale_max
-                total_width = (total / scale_max) * (chart_width - 10)
-                completed_width = (completed / scale_max) * (chart_width - 10) if scale_max > 0 else 0
-
-                # Positioning
-                bar_y = axis_y + i * bar_spacing + (bar_spacing - bar_height) / 2
-                bar_x = axis_x
-
-                # Draw total background bar (light gray)
-                cr.set_source_rgba(0.85, 0.85, 0.85, 0.9)
-                cr.rectangle(bar_x, bar_y, total_width, bar_height)
-                cr.fill()
-
-                # Draw completed portion on top (green)
-                cr.set_source_rgb(0.15, 0.68, 0.37)
-                cr.rectangle(bar_x, bar_y, completed_width, bar_height)
-                cr.fill()
-
-                # Draw month label on the left
-                cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.9)
-                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-                cr.set_font_size(10)
-                try:
-                    date_obj = datetime.strptime(month_key, '%Y-%m')
-                    month_str = date_obj.strftime('%b %y')
-                except (ValueError, AttributeError):
-                    month_str = month_key
-                (tx, ty, tw, th, dx, dy) = cr.text_extents(month_str)
-                label_x = axis_x - 8 - tw - tx
-                label_y = bar_y + bar_height / 2 + th / 2 - ty
-                cr.move_to(label_x, label_y)
-                cr.show_text(month_str)
-
-                # Draw value label as completed/total to the right of the bar
-                val_str = f"{int(completed)}/{int(total)}"
-                cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
-                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-                cr.set_font_size(9)
-                (tx, ty, tw, th, dx, dy) = cr.text_extents(val_str)
-                val_x = axis_x + max(total_width, completed_width) + 6
-                val_y = bar_y + bar_height / 2 + th / 2 - ty
-                cr.move_to(val_x, val_y)
-                cr.show_text(val_str)
-
-    def _calculate_monthly_data(self) -> dict:
-        """Calculate monthly completion data from goals.
-        
-        Returns a dict with keys as "YYYY-MM" and values as dicts with 'completed' count.
-        """
-        # Track both completed and total (items due/completed in that month)
+    def _calculate_monthly_data(self):
         monthly = defaultdict(lambda: {'completed': 0, 'total': 0})
-
-        for goal in self._goals:
-            # Goal completion or end date counts towards the month
-            completion_date_str = goal.get('completion_date', '')
-            end_date_str = goal.get('end_date', '')
-
-            # If goal was completed, count as completed and total in its completion month
-            if completion_date_str:
+        for g in self._goals:
+            cd, ed = g.get('completion_date', ''), g.get('end_date', '')
+            if cd:
                 try:
-                    comp_date = datetime.strptime(completion_date_str, '%Y-%m-%d').date()
-                    month_key = comp_date.strftime('%Y-%m')
-                    monthly[month_key]['completed'] += 1
-                    monthly[month_key]['total'] += 1
-                except (ValueError, AttributeError):
-                    pass
-            # If goal wasn't completed but has an end date, count it as total for the end month
-            elif end_date_str:
+                    mk = datetime.strptime(cd, '%Y-%m-%d').strftime('%Y-%m')
+                    monthly[mk]['completed'] += 1; monthly[mk]['total'] += 1
+                except: pass
+            elif ed:
                 try:
-                    end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
-                    month_key = end_date.strftime('%Y-%m')
-                    monthly[month_key]['total'] += 1
-                except (ValueError, AttributeError):
-                    pass
-
-            # Also count tasks: completed tasks increment completed+total; tasks with end_date increment total
-            for task in goal.get('tasks', []):
-                task_completed = task.get('completed', False)
-                # Prefer task completion date, fall back to task end_date or goal's dates
-                task_comp_str = task.get('completion_date') or ''
-                task_end_str = task.get('end_date') or ''
-
-                if task_completed:
-                    # Determine a date for the completed task (completion_date preferred, else end_date)
-                    date_str = task_comp_str or task_end_str or completion_date_str or end_date_str
-                    if date_str:
+                    mk = datetime.strptime(ed, '%Y-%m-%d').strftime('%Y-%m')
+                    monthly[mk]['total'] += 1
+                except: pass
+            for t in g.get('tasks', []):
+                tc, tcs, tes = t.get('completed'), t.get('completion_date') or '', t.get('end_date') or ''
+                if tc:
+                    ds = tcs or tes or cd or ed
+                    if ds:
                         try:
-                            dt = datetime.strptime(date_str, '%Y-%m-%d').date()
-                            month_key = dt.strftime('%Y-%m')
-                            monthly[month_key]['completed'] += 1
-                            monthly[month_key]['total'] += 1
-                        except (ValueError, AttributeError):
-                            pass
+                            mk = datetime.strptime(ds, '%Y-%m-%d').strftime('%Y-%m')
+                            monthly[mk]['completed'] += 1; monthly[mk]['total'] += 1
+                        except: pass
                 else:
-                    # Not completed; if there's an end date, count as total for that month
-                    date_str = task_end_str or end_date_str
-                    if date_str:
+                    ds = tes or ed
+                    if ds:
                         try:
-                            dt = datetime.strptime(date_str, '%Y-%m-%d').date()
-                            month_key = dt.strftime('%Y-%m')
-                            monthly[month_key]['total'] += 1
-                        except (ValueError, AttributeError):
-                            pass
-
-        # Return sorted dict by month key
+                            mk = datetime.strptime(ds, '%Y-%m-%d').strftime('%Y-%m')
+                            monthly[mk]['total'] += 1
+                        except: pass
         return dict(sorted(monthly.items()))
 
-    def _draw_slice_text(self, cr: cairo.Context, x: float, y: float, text: str) -> None:
-        """Helper to draw text centered at x, y."""
-        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(14)
-        # White text usually looks good on colors
-        cr.set_source_rgb(1, 1, 1) 
-        
-        (tx, ty, width, height, dx, dy) = cr.text_extents(text)
-        cr.move_to(x - width / 2 - tx, y + height / 2 - ty)
-        cr.show_text(text)

@@ -11,7 +11,7 @@ from gi.repository import Adw, Gtk, Gdk, Gio, GLib
 from goal_row import GoalRow
 from edit_dialog import EditGoalDialog
 from storage import load_tasks, save_tasks, export_to_ics, export_backup, import_backup
-from summary_widget import GoalSummaryWidget
+from summary_widget import GoalPieChartsWidget, GoalTrendWidget
 from timeline_widget import TimelineWidget
 from notification_manager import NotificationManager
 from datetime import datetime, date
@@ -124,6 +124,10 @@ class MainWindow(Adw.ApplicationWindow):
         content_box.set_margin_end(12)
         clamp.set_child(content_box)
 
+        # Pie Charts above entry section
+        self.pie_charts_widget = GoalPieChartsWidget()
+        content_box.append(self.pie_charts_widget)
+
         # Entry section
         entry_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         content_box.append(entry_box)
@@ -181,8 +185,8 @@ class MainWindow(Adw.ApplicationWindow):
         right_sidebar_box.set_margin_end(12)
         right_scrolled.set_child(right_sidebar_box)
 
-        # Summary Widget as right sidebar with Pie Charts
-        self.summary_widget = GoalSummaryWidget()
+        # Summary Trend Widget as right sidebar
+        self.summary_widget = GoalTrendWidget()
         right_sidebar_box.append(self.summary_widget)
 
         # Trend widget no longer needed
@@ -548,7 +552,8 @@ class MainWindow(Adw.ApplicationWindow):
             total_tasks += len(tasks)
             completed_tasks += sum(1 for t in tasks if t.get("completed", False))
 
-        self.summary_widget.update_status(completed_goals, total_goals, completed_tasks, total_tasks, goals)
+        self.pie_charts_widget.update_data(completed_goals, total_goals, completed_tasks, total_tasks, goals)
+        self.summary_widget.update_data(goals)
         self.timeline_widget.update_data(goals)
 
     def _update_empty_state(self) -> None:
