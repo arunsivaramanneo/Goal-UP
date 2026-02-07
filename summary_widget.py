@@ -3,6 +3,8 @@
 import math
 import gi
 import cairo
+from datetime import datetime, date, timedelta
+from collections import defaultdict
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -15,7 +17,7 @@ class GoalSummaryWidget(Gtk.DrawingArea):
     def __init__(self):
         super().__init__()
         self.set_content_width(450)
-        self.set_content_height(200)
+        self.set_content_height(950)
         self.set_draw_func(self._draw_func)
         
         self._completed_goals = 0
@@ -52,27 +54,33 @@ class GoalSummaryWidget(Gtk.DrawingArea):
 
     def _draw_func(self, area, cr: cairo.Context, width: int, height: int) -> None:
         """Draw the progress chart."""
-        # Split into two areas
-        left_center_x = width * 0.25
-        right_center_x = width * 0.75
-        center_y = height / 2
-        radius = 70
+        # Split into three areas: pie charts and bar chart
+        center_x = width / 2
+        top_center_y = height * 0.15
+        bottom_pie_y = height * 0.45
+        
+        pie_radius = 100
         
         # Calculate total tasks across all goals (denominator for left chart)
         total_tasks_all_goals = 0
         for g in self._goals:
              total_tasks_all_goals += len(g.get("tasks", []))
 
-        # Draw Goals Pie Chart (Left) - Distribution by Task Count
-        self._draw_goals_pie(cr, left_center_x, center_y, radius, 
+        # Draw Goals Pie Chart (Top)
+        self._draw_goals_pie(cr, center_x, top_center_y, pie_radius, 
                              self._goals, total_tasks_all_goals, "Goals")
 
-        # Draw Tasks Pie Chart (Right) - Completed vs Remaining
-        # Completed: Green (0.2, 0.7, 0.3)
-        # Remaining: Orange (0.9, 0.4, 0.2)
-        self._draw_pie(cr, right_center_x, center_y, radius, 
+        # Draw Tasks Pie Chart (Below goals)
+        self._draw_pie(cr, center_x, bottom_pie_y, pie_radius, 
                        self._completed_tasks, self._total_tasks, 
-                       (0.15, 0.68, 0.37), (0.9, 0.4, 0.2), "Tasks") # Green / Orange
+                       (0.15, 0.68, 0.37), (0.9, 0.4, 0.2), "Tasks")
+
+        # Draw Monthly Bar Chart (Bottom)
+        bar_chart_y = height * 0.65
+        bar_chart_height = height * 0.35
+        bar_chart_x = 20
+        bar_chart_width = width - 40
+        self._draw_monthly_bar_chart(cr, bar_chart_x, bar_chart_y, bar_chart_width, bar_chart_height)
 
     def _parse_color(self, color_str: str) -> tuple:
         """Parse a CSS color string into a (r, g, b) tuple scaled 0.0-1.0.
@@ -504,6 +512,132 @@ class GoalSummaryWidget(Gtk.DrawingArea):
         (lx, ly, l_width, l_height, ldx, ldy) = cr.text_extents(full_label)
         cr.move_to(center_x - l_width / 2 - lx, center_y + radius + 30)
         cr.show_text(full_label)
+
+    def _draw_monthly_bar_chart(self, cr: cairo.Context, x: float, y: float, width: float, height: float) -> None:
+        """Draw a bar chart showing monthly completion trends."""
+        # Calculate monthly data
+        monthly_data = self._calculate_monthly_data()
+        
+        if not monthly_data:
+            # No data to display
+            return
+
+        # Get the last 6 months of data
+        months = list(monthly_data.keys())[-6:]
+        max_total = max([monthly_data[m].get('total', 0) for m in months], default=1)
+        max_completed = max([monthly_data[m].get('completed', 0) for m in months], default=0)
+        # Use the larger of total/completed for scaling
+        scale_max = max(max_total, max_completed, 1)
+        
+        # Draw title
+        fg_color = self._style_context.get_color()
+        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+        cr.set_font_size(12)
+        title_text = "Monthly Completions"
+        (tx, ty, tw, th, dx, dy) = cr.text_extents(title_text)
+        title_x = x + width / 2 - tw / 2 - tx  # Center the title
+        cr.move_to(title_x, y - 10)
+        cr.show_text(title_text)
+        
+        # Chart area and axes
+        axis_x = x + 40
+        axis_y = y + height - 30
+        chart_width = width - 60
+        chart_height = height - 60
+
+        # Draw Y axis
+        cr.set_line_width(1)
+        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.5)
+        cr.move_to(axis_x, axis_y)
+        cr.line_to(axis_x, y + 10)
+        cr.stroke()
+
+        # Draw X axis
+        cr.move_to(axis_x, axis_y)
+        cr.line_to(axis_x + chart_width, axis_y)
+        cr.stroke()
+
+        # Draw bars (single completed bar per month)
+        if len(months) > 0:
+            bar_width = chart_width / len(months) * 0.7
+            bar_spacing = chart_width / len(months)
+
+            for i, month_key in enumerate(months):
+                month_data = monthly_data[month_key]
+                completed = month_data['completed']
+
+                # Calculate bar height
+                if max_completed > 0:
+                    bar_height = (completed / max_completed) * (chart_height - 20)
+                else:
+                    bar_height = 0
+
+                # Draw bar
+                bar_x = axis_x + i * bar_spacing + (bar_spacing - bar_width) / 2
+                bar_y = axis_y - bar_height
+
+                # Green bar for completed
+                cr.set_source_rgb(0.15, 0.68, 0.37)
+                cr.rectangle(bar_x, bar_y, bar_width, bar_height)
+                cr.fill()
+
+                # Draw month label
+                cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.7)
+                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+                cr.set_font_size(10)
+                # Format month key "2026-02" as "Feb 26"
+                try:
+                    date_obj = datetime.strptime(month_key, '%Y-%m')
+                    month_str = date_obj.strftime('%b %y')  # e.g., "Feb 26"
+                except (ValueError, AttributeError):
+                    month_str = month_key
+                (tx, ty, tw, th, dx, dy) = cr.text_extents(month_str)
+                cr.move_to(bar_x + bar_width / 2 - tw / 2 - tx, axis_y + 15)
+                cr.show_text(month_str)
+
+                # Draw value on top of bar
+                if completed > 0:
+                    cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
+                    cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+                    cr.set_font_size(9)
+                    val_str = str(int(completed))
+                    (tx, ty, tw, th, dx, dy) = cr.text_extents(val_str)
+                    cr.move_to(bar_x + bar_width / 2 - tw / 2 - tx, bar_y - 5)
+                    cr.show_text(val_str)
+
+    def _calculate_monthly_data(self) -> dict:
+        """Calculate monthly completion data from goals.
+        
+        Returns a dict with keys as "YYYY-MM" and values as dicts with 'completed' count.
+        """
+        monthly = defaultdict(lambda: {'completed': 0})
+        
+        for goal in self._goals:
+            completion_date_str = goal.get('completion_date', '')
+            if completion_date_str:
+                try:
+                    # Parse completion date
+                    comp_date = datetime.strptime(completion_date_str, '%Y-%m-%d').date()
+                    month_key = comp_date.strftime('%Y-%m')
+                    monthly[month_key]['completed'] += 1
+                except (ValueError, AttributeError):
+                    pass
+            
+            # Also count completed tasks
+            for task in goal.get('tasks', []):
+                if task.get('completed', False):
+                    # Try to get task completion date, or use goal's completion date
+                    task_date_str = task.get('completion_date', completion_date_str)
+                    if task_date_str:
+                        try:
+                            task_date = datetime.strptime(task_date_str, '%Y-%m-%d').date()
+                            month_key = task_date.strftime('%Y-%m')
+                            monthly[month_key]['completed'] += 1
+                        except (ValueError, AttributeError):
+                            pass
+        
+        return dict(sorted(monthly.items()))
 
     def _draw_slice_text(self, cr: cairo.Context, x: float, y: float, text: str) -> None:
         """Helper to draw text centered at x, y."""

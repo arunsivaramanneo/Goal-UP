@@ -91,7 +91,7 @@ class MainWindow(Adw.ApplicationWindow):
         import_json_action.connect("activate", self._on_import_json_clicked)
         self.add_action(import_json_action)
 
-        # Content area (Sidebar + Main)
+        # Content area (Sidebar + Main + Sidebar)
         content_horizontal_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         main_box.append(content_horizontal_box)
 
@@ -123,10 +123,6 @@ class MainWindow(Adw.ApplicationWindow):
         content_box.set_margin_start(12)
         content_box.set_margin_end(12)
         clamp.set_child(content_box)
-
-        # Summary Widget
-        self.summary_widget = GoalSummaryWidget()
-        content_box.append(self.summary_widget)
 
         # Entry section
         entry_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -166,6 +162,31 @@ class MainWindow(Adw.ApplicationWindow):
         self.empty_label.set_margin_top(24)
         self.empty_label.set_margin_bottom(24)
         content_box.append(self.empty_label)
+
+        # Right sidebar separator
+        right_separator = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        content_horizontal_box.append(right_separator)
+
+        # Right sidebar as scrollable content
+        right_scrolled = Gtk.ScrolledWindow()
+        right_scrolled.set_vexpand(True)
+        right_scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        content_horizontal_box.append(right_scrolled)
+
+        # Right sidebar box
+        right_sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        right_sidebar_box.set_margin_top(12)
+        right_sidebar_box.set_margin_bottom(12)
+        right_sidebar_box.set_margin_start(12)
+        right_sidebar_box.set_margin_end(12)
+        right_scrolled.set_child(right_sidebar_box)
+
+        # Summary Widget as right sidebar with Pie Charts
+        self.summary_widget = GoalSummaryWidget()
+        right_sidebar_box.append(self.summary_widget)
+
+        # Trend widget no longer needed
+        self.trend_widget = None
 
         # Load existing goals
         self._load_goals()
