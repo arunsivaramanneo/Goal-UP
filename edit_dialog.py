@@ -15,19 +15,20 @@ class EditGoalDialog(Adw.Dialog):
     __gtype_name__ = "EditGoalDialog"
 
     __gsignals__ = {
-        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str, str, str)),  # title, description, end_date, parent_id, color
+        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str, str, str, str)),  # title, description, end_date, parent_id, color, end_time
     }
 
-    def __init__(self, title: str = "", description: str = "", end_date: str = "", parent_id: str = "", color: str = "", possible_parents: list[tuple[str, str]] = None):
+    def __init__(self, title: str = "", description: str = "", end_date: str = "", parent_id: str = "", color: str = "", possible_parents: list[tuple[str, str]] = None, end_time: str = ""):
         super().__init__()
 
         self._parent_id = parent_id
         self._possible_parents = possible_parents or [] # List of (id, title)
         self._initial_color = color or "rgb(53,132,228)"
+        self._chosen_time = end_time
 
         self.set_title("Edit Goal")
         self.set_content_width(400)
-        self.set_content_height(380)
+        self.set_content_height(450)
 
         # Main layout
         toolbar_view = Adw.ToolbarView()
@@ -105,6 +106,31 @@ class EditGoalDialog(Adw.Dialog):
         clear_date_btn.set_valign(Gtk.Align.CENTER)
         clear_date_btn.connect("clicked", self._on_clear_date_clicked)
         self.date_row.add_suffix(clear_date_btn)
+
+        # End time group (optional)
+        time_group = Adw.PreferencesGroup()
+        time_group.set_title("End Time (Optional)")
+        content_box.append(time_group)
+
+        self.time_row = Adw.ActionRow()
+        self.time_row.set_title("End Time")
+        self.time_row.set_subtitle(end_time or "No time set")
+        time_group.add(self.time_row)
+
+        # Time picker button
+        self.pick_time_btn = Gtk.Button()
+        self.pick_time_btn.set_icon_name("document-properties-symbolic")
+        self.pick_time_btn.set_valign(Gtk.Align.CENTER)
+        self.pick_time_btn.add_css_class("flat")
+        self.pick_time_btn.connect("clicked", self._on_pick_time_clicked)
+        self.time_row.add_suffix(self.pick_time_btn)
+
+        # Clear time button
+        clear_time_btn = Gtk.Button(label="Clear")
+        clear_time_btn.add_css_class("flat")
+        clear_time_btn.set_valign(Gtk.Align.CENTER)
+        clear_time_btn.connect("clicked", self._on_clear_time_clicked)
+        self.time_row.add_suffix(clear_time_btn)
 
         # Parent Selection group (Optional)
         parent_group = Adw.PreferencesGroup()
@@ -189,6 +215,75 @@ class EditGoalDialog(Adw.Dialog):
         self._chosen_date = ""
         self.date_row.set_subtitle("No date set")
 
+    def _on_pick_time_clicked(self, button: Gtk.Button) -> None:
+        """Open a time picker popover."""
+        self._time_popover = Gtk.Popover()
+        self._time_popover.set_parent(button)
+        self._time_popover.set_autohide(True)
+
+        # Time picker box
+        time_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        time_box.set_margin_top(12)
+        time_box.set_margin_bottom(12)
+        time_box.set_margin_start(12)
+        time_box.set_margin_end(12)
+
+        # Hour spin button
+        hour_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        hour_label = Gtk.Label(label="Hour:")
+        hour_label.set_size_request(40, -1)
+        hour_adjustment = Gtk.Adjustment(value=0, lower=0, upper=23, step_increment=1)
+        self.hour_spin = Gtk.SpinButton(adjustment=hour_adjustment)
+        self.hour_spin.set_numeric(True)
+        self.hour_spin.set_digits(0)
+        hour_box.append(hour_label)
+        hour_box.append(self.hour_spin)
+
+        # Minute spin button
+        minute_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        minute_label = Gtk.Label(label="Minute:")
+        minute_label.set_size_request(40, -1)
+        minute_adjustment = Gtk.Adjustment(value=0, lower=0, upper=59, step_increment=1)
+        self.minute_spin = Gtk.SpinButton(adjustment=minute_adjustment)
+        self.minute_spin.set_numeric(True)
+        self.minute_spin.set_digits(0)
+        minute_box.append(minute_label)
+        minute_box.append(self.minute_spin)
+
+        # Parse existing time if available
+        if self._chosen_time:
+            try:
+                parts = self._chosen_time.split(":")
+                self.hour_spin.set_value(int(parts[0]))
+                self.minute_spin.set_value(int(parts[1]))
+            except (ValueError, IndexError):
+                pass
+
+        time_box.append(hour_box)
+        time_box.append(minute_box)
+
+        # OK button
+        ok_button = Gtk.Button(label="OK")
+        ok_button.add_css_class("suggested-action")
+        ok_button.connect("clicked", self._on_time_selected, self._time_popover)
+        time_box.append(ok_button)
+
+        self._time_popover.set_child(time_box)
+        self._time_popover.popup()
+
+    def _on_time_selected(self, button: Gtk.Button, popover: Gtk.Popover) -> None:
+        """Handle time selection."""
+        hour = int(self.hour_spin.get_value())
+        minute = int(self.minute_spin.get_value())
+        self._chosen_time = f"{hour:02d}:{minute:02d}"
+        self.time_row.set_subtitle(self._chosen_time)
+        popover.popdown()
+
+    def _on_clear_time_clicked(self, button: Gtk.Button) -> None:
+        """Clear the chosen time."""
+        self._chosen_time = ""
+        self.time_row.set_subtitle("No time set")
+
     def _on_save_clicked(self, button: Gtk.Button) -> None:
         """Handle save button click."""
         title = self.title_row.get_text().strip()
@@ -203,7 +298,7 @@ class EditGoalDialog(Adw.Dialog):
         
         if title:
             color = self.color_button.get_rgba().to_string()
-            self.emit("save", title, description, end_date, parent_id, color)
+            self.emit("save", title, description, end_date, parent_id, color, self._chosen_time)
             self.close()
 
 
@@ -213,18 +308,19 @@ class EditTaskDialog(Adw.Dialog):
     __gtype_name__ = "EditTaskDialog"
 
     __gsignals__ = {
-        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str)),  # text, end_date, parent_id
+        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str, str)),  # text, end_date, parent_id, end_time
     }
 
-    def __init__(self, text: str = "", end_date: str = "", parent_id: str = "", possible_parents: list[tuple[str, str]] = None):
+    def __init__(self, text: str = "", end_date: str = "", parent_id: str = "", possible_parents: list[tuple[str, str]] = None, end_time: str = ""):
         super().__init__()
 
         self._parent_id = parent_id
         self._possible_parents = possible_parents or []
+        self._chosen_time = end_time
 
         self.set_title("Edit Task")
         self.set_content_width(400)
-        self.set_content_height(350)
+        self.set_content_height(400)
 
         # Main layout
         toolbar_view = Adw.ToolbarView()
@@ -293,6 +389,31 @@ class EditTaskDialog(Adw.Dialog):
         clear_btn.connect("clicked", self._on_clear_date_clicked)
         self.date_row.add_suffix(clear_btn)
 
+        # End time group (optional)
+        time_group = Adw.PreferencesGroup()
+        time_group.set_title("End Time (Optional)")
+        content_box.append(time_group)
+
+        self.time_row = Adw.ActionRow()
+        self.time_row.set_title("End Time")
+        self.time_row.set_subtitle(end_time or "No time set")
+        time_group.add(self.time_row)
+
+        # Time picker button
+        self.pick_time_btn = Gtk.Button()
+        self.pick_time_btn.set_icon_name("document-properties-symbolic")
+        self.pick_time_btn.set_valign(Gtk.Align.CENTER)
+        self.pick_time_btn.add_css_class("flat")
+        self.pick_time_btn.connect("clicked", self._on_pick_time_clicked)
+        self.time_row.add_suffix(self.pick_time_btn)
+
+        # Clear time button
+        clear_time_btn = Gtk.Button(label="Clear")
+        clear_time_btn.add_css_class("flat")
+        clear_time_btn.set_valign(Gtk.Align.CENTER)
+        clear_time_btn.connect("clicked", self._on_clear_time_clicked)
+        self.time_row.add_suffix(clear_time_btn)
+
         # Parent Selection group (Optional)
         parent_group = Adw.PreferencesGroup()
         parent_group.set_title("Dependency")
@@ -355,6 +476,75 @@ class EditTaskDialog(Adw.Dialog):
         self._chosen_date = ""
         self.date_row.set_subtitle("No date set")
 
+    def _on_pick_time_clicked(self, button: Gtk.Button) -> None:
+        """Open a time picker popover."""
+        self._time_popover = Gtk.Popover()
+        self._time_popover.set_parent(button)
+        self._time_popover.set_autohide(True)
+
+        # Time picker box
+        time_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        time_box.set_margin_top(12)
+        time_box.set_margin_bottom(12)
+        time_box.set_margin_start(12)
+        time_box.set_margin_end(12)
+
+        # Hour spin button
+        hour_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        hour_label = Gtk.Label(label="Hour:")
+        hour_label.set_size_request(40, -1)
+        hour_adjustment = Gtk.Adjustment(value=0, lower=0, upper=23, step_increment=1)
+        self.hour_spin = Gtk.SpinButton(adjustment=hour_adjustment)
+        self.hour_spin.set_numeric(True)
+        self.hour_spin.set_digits(0)
+        hour_box.append(hour_label)
+        hour_box.append(self.hour_spin)
+
+        # Minute spin button
+        minute_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        minute_label = Gtk.Label(label="Minute:")
+        minute_label.set_size_request(40, -1)
+        minute_adjustment = Gtk.Adjustment(value=0, lower=0, upper=59, step_increment=1)
+        self.minute_spin = Gtk.SpinButton(adjustment=minute_adjustment)
+        self.minute_spin.set_numeric(True)
+        self.minute_spin.set_digits(0)
+        minute_box.append(minute_label)
+        minute_box.append(self.minute_spin)
+
+        # Parse existing time if available
+        if self._chosen_time:
+            try:
+                parts = self._chosen_time.split(":")
+                self.hour_spin.set_value(int(parts[0]))
+                self.minute_spin.set_value(int(parts[1]))
+            except (ValueError, IndexError):
+                pass
+
+        time_box.append(hour_box)
+        time_box.append(minute_box)
+
+        # OK button
+        ok_button = Gtk.Button(label="OK")
+        ok_button.add_css_class("suggested-action")
+        ok_button.connect("clicked", self._on_time_selected, self._time_popover)
+        time_box.append(ok_button)
+
+        self._time_popover.set_child(time_box)
+        self._time_popover.popup()
+
+    def _on_time_selected(self, button: Gtk.Button, popover: Gtk.Popover) -> None:
+        """Handle time selection."""
+        hour = int(self.hour_spin.get_value())
+        minute = int(self.minute_spin.get_value())
+        self._chosen_time = f"{hour:02d}:{minute:02d}"
+        self.time_row.set_subtitle(self._chosen_time)
+        popover.popdown()
+
+    def _on_clear_time_clicked(self, button: Gtk.Button) -> None:
+        """Clear the chosen time."""
+        self._chosen_time = ""
+        self.time_row.set_subtitle("No time set")
+
     def _on_save_clicked(self, button: Gtk.Button) -> None:
         """Handle save button click."""
         text = self.text_row.get_text().strip()
@@ -367,5 +557,5 @@ class EditTaskDialog(Adw.Dialog):
             parent_id = self._possible_parents[parent_idx - 1][0]
 
         if text:
-            self.emit("save", text, end_date, parent_id)
+            self.emit("save", text, end_date, parent_id, self._chosen_time)
             self.close()

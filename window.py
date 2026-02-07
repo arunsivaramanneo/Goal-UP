@@ -343,9 +343,9 @@ class MainWindow(Adw.ApplicationWindow):
         rgba.alpha = 1.0
         self.color_button.set_rgba(rgba)
 
-    def _add_goal(self, title: str, description: str, completed: bool, tasks: list, created_at: str = None, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, color: str = None) -> None:
+    def _add_goal(self, title: str, description: str, completed: bool, tasks: list, created_at: str = None, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, color: str = None, end_time: str = "") -> None:
         """Add a new goal to the list."""
-        row = GoalRow(title, description, completed, tasks, created_at, end_date, id, parent_id, depth, color=color)
+        row = GoalRow(title, description, completed, tasks, created_at, end_date, id, parent_id, depth, color=color, end_time=end_time)
         row.connect("goal-changed", self._on_goal_changed)
         row.connect("goal-deleted", self._on_goal_deleted)
         row.connect("edit-requested", self._on_edit_requested)
@@ -382,13 +382,13 @@ class MainWindow(Adw.ApplicationWindow):
             if g["id"] != row.id and g["id"] not in descendants:
                 possible_parents.append((g["id"], g["title"]))
 
-        dialog = EditGoalDialog(row.goal_title, row.description, row.end_date, row.parent_id, row.color, possible_parents)
+        dialog = EditGoalDialog(row.goal_title, row.description, row.end_date, row.parent_id, row.color, possible_parents, row.end_time)
         dialog.connect("save", self._on_edit_save, row)
         dialog.present(self)
 
-    def _on_edit_save(self, dialog: EditGoalDialog, title: str, description: str, end_date: str, parent_id: str, color: str, row: GoalRow) -> None:
+    def _on_edit_save(self, dialog: EditGoalDialog, title: str, description: str, end_date: str, parent_id: str, color: str, end_time: str, row: GoalRow) -> None:
         """Handle save from edit dialog."""
-        row.update_details(title, description, end_date, parent_id, color)
+        row.update_details(title, description, end_date, parent_id, color, end_time)
         self._reorder_goals()
         self._save_goals()
 
@@ -413,7 +413,8 @@ class MainWindow(Adw.ApplicationWindow):
                 goal.get("id"),
                 goal.get("parent_id", ""),
                 goal.get("depth", 0),
-                goal.get("color", None)
+                goal.get("color", None),
+                goal.get("end_time", "")
             )
             if goal.get("completion_date"):
                 row = self.goal_list.get_last_child()
@@ -438,6 +439,7 @@ class MainWindow(Adw.ApplicationWindow):
                     "tasks": row.get_tasks(),
                     "created_at": row.created_at,
                     "end_date": row.end_date,
+                    "end_time": row.end_time,
                     "completion_date": getattr(row, "_completion_date", ""),
                     "color": row.color
                 })

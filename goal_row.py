@@ -25,7 +25,7 @@ class SubTaskRow(Adw.ActionRow):
         "task-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
-    def __init__(self, text: str, completed: bool = False, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0):
+    def __init__(self, text: str, completed: bool = False, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, end_time: str = ""):
         super().__init__()
 
         self._id = id or uuid.uuid4().hex
@@ -34,6 +34,7 @@ class SubTaskRow(Adw.ActionRow):
         self._text = text
         self._completed = completed
         self._end_date = end_date
+        self._end_time = end_time
         self._completion_date = ""  # Will be set when completed
 
         self.set_title(text)
@@ -91,6 +92,10 @@ class SubTaskRow(Adw.ActionRow):
         return self._end_date
 
     @property
+    def end_time(self) -> str:
+        return self._end_time
+
+    @property
     def id(self) -> str:
         return self._id
 
@@ -138,7 +143,7 @@ class SubTaskRow(Adw.ActionRow):
                 if t_id != self._id and t_id not in descendants:
                     possible_parents.append((t_id, t_text))
 
-        dialog = EditTaskDialog(self._text, self._end_date, self._parent_id, possible_parents)
+        dialog = EditTaskDialog(self._text, self._end_date, self._parent_id, possible_parents, self._end_time)
         dialog.connect("save", self._on_edit_save)
         # Find the root window to present the dialog
         root = self.get_root()
@@ -175,9 +180,10 @@ class SubTaskRow(Adw.ActionRow):
                         to_check.append(t["id"])
         return descendants
 
-    def _on_edit_save(self, dialog: EditTaskDialog, text: str, end_date: str, parent_id: str) -> None:
+    def _on_edit_save(self, dialog: EditTaskDialog, text: str, end_date: str, parent_id: str, end_time: str) -> None:
         self._text = text
         self._end_date = end_date
+        self._end_time = end_time
         self._parent_id = parent_id
         self._update_days_remaining()
         self._update_style()
@@ -238,7 +244,7 @@ class GoalRow(Adw.ExpanderRow):
         "edit-requested": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
-    def __init__(self, title: str, description: str = "", completed: bool = False, tasks: list = None, created_at: str = None, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, color: str = None):
+    def __init__(self, title: str, description: str = "", completed: bool = False, tasks: list = None, created_at: str = None, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, color: str = None, end_time: str = ""):
         super().__init__()
 
         self._id = id or uuid.uuid4().hex
@@ -251,6 +257,7 @@ class GoalRow(Adw.ExpanderRow):
         self._subtask_rows = []  # Track sub-task rows for persistence
         self._created_at = created_at or datetime.now().isoformat()
         self._end_date = end_date or ""
+        self._end_time = end_time or ""
         self._completion_date = ""  # Will be set when completed
         self._color = color or "rgb(53,132,228)" # Default blue
 
@@ -395,6 +402,10 @@ class GoalRow(Adw.ExpanderRow):
         return self._end_date
 
     @property
+    def end_time(self) -> str:
+        return self._end_time
+
+    @property
     def id(self) -> str:
         return self._id
 
@@ -425,6 +436,7 @@ class GoalRow(Adw.ExpanderRow):
                 "text": row.task_text,
                 "completed": row.completed,
                 "end_date": row.end_date,
+                "end_time": row.end_time,
                 "completion_date": getattr(row, "_completion_date", "")
             })
         return tasks
@@ -441,11 +453,12 @@ class GoalRow(Adw.ExpanderRow):
     def color(self) -> str:
         return self._color
 
-    def update_details(self, title: str, description: str, end_date: str = "", parent_id: str = "", color: str = None) -> None:
-        """Update goal title, description, end date, parent, and color."""
+    def update_details(self, title: str, description: str, end_date: str = "", parent_id: str = "", color: str = None, end_time: str = "") -> None:
+        """Update goal title, description, end date, parent, color, and end time."""
         self._title = title
         self._description = description
         self._end_date = end_date
+        self._end_time = end_time
         self._parent_id = parent_id
         if color:
             self._color = color
@@ -469,9 +482,9 @@ class GoalRow(Adw.ExpanderRow):
         cr.arc(width / 2, height / 2, radius, 0, 2 * 3.14159)
         cr.fill()
 
-    def _add_subtask(self, text: str, completed: bool, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0) -> SubTaskRow:
+    def _add_subtask(self, text: str, completed: bool, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, end_time: str = "") -> SubTaskRow:
         """Add a sub-task row."""
-        row = SubTaskRow(text, completed, end_date, id, parent_id, depth)
+        row = SubTaskRow(text, completed, end_date, id, parent_id, depth, end_time)
         row.connect("task-toggled", self._on_subtask_toggled)
         row.connect("task-changed", self._on_subtask_changed)
         row.connect("task-deleted", self._on_subtask_deleted, row)
@@ -486,7 +499,8 @@ class GoalRow(Adw.ExpanderRow):
             task.get("end_date", ""),
             task.get("id"),
             task.get("parent_id", ""),
-            task.get("depth", 0)
+            task.get("depth", 0),
+            task.get("end_time", "")
         )
         if row and task.get("completion_date"):
             row._completion_date = task["completion_date"]
