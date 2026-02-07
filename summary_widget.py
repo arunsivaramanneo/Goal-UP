@@ -9,7 +9,7 @@ from collections import defaultdict
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Gtk, Gdk, GObject
+from gi.repository import Gtk, Gdk, GObject, Adw, GLib
 
 class GoalPieChartsWidget(Gtk.DrawingArea):
     """Widget that draws the pie charts for goals and tasks."""
@@ -211,41 +211,76 @@ class GoalTrendWidget(Gtk.DrawingArea):
         self.queue_draw()
 
     def _draw_func(self, area, cr, width, height):
-        self._draw_monthly_bar_chart(cr, 10, 40, width - 20, height - 60)
+        self._draw_monthly_bar_chart(cr, 10, 20, width - 20, height - 40)
 
     def _draw_monthly_bar_chart(self, cr, x, y, width, height):
         monthly_data = self._calculate_monthly_data()
         if not monthly_data: return
-        months = list(monthly_data.keys())[:6]
-        scale_max = max([max(d['total'], d['completed']) for d in monthly_data.values()] + [1])
+        
+        # Get last 12 months
+        sorted_keys = sorted(monthly_data.keys())
+        months = sorted_keys[-12:] if len(sorted_keys) >= 12 else sorted_keys
+        
+        scale_max = max([max(monthly_data[mk]['total'], monthly_data[mk]['completed']) for mk in months] + [1])
         fg = self._style_context.get_color()
         cr.set_source_rgba(fg.red, fg.green, fg.blue, fg.alpha)
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL); cr.set_font_size(12)
         txt = "Monthly Completions"; (tx, ty, tw, th, dx, dy) = cr.text_extents(txt)
-        cr.move_to(x + width/2 - tw/2 - tx, y - 10); cr.show_text(txt)
-        ax, ay, cw, ch = x + 60, y + 20, width - 80, height - 40
+        cr.move_to(x + width/2 - tw/2 - tx, y - 5); cr.show_text(txt)
+        
+        ax, ay, cw, ch = x + 30, y + 20, width - 40, height - 60
         cr.set_line_width(1); cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.5)
         cr.move_to(ax, ay); cr.line_to(ax, ay + ch); cr.line_to(ax + cw, ay + ch); cr.stroke()
+        
         if months:
-            bh, bs = (ch / len(months) * 0.7), (ch / len(months))
+            bw, bs = (cw / len(months) * 0.7), (cw / len(months))
             for i, mk in enumerate(months):
                 d = monthly_data[mk]; c, t = d['completed'], d['total']
-                tw, cw_ = (t / scale_max) * (cw - 10), (c / scale_max) * (cw - 10)
-                by = ay + i * bs + (bs - bh) / 2
-                cr.set_source_rgba(0.85, 0.85, 0.85, 0.9); cr.rectangle(ax, by, tw, bh); cr.fill()
-                cr.set_source_rgb(0.15, 0.68, 0.37); cr.rectangle(ax, by, cw_, bh); cr.fill()
+                th_, ch_ = (t / scale_max) * ch, (c / scale_max) * ch
+                bx = ax + i * bs + (bs - bw) / 2
+                
+                # Draw total bar (light gray)
+                cr.set_source_rgba(0.85, 0.85, 0.85, 0.9)
+                cr.rectangle(bx, ay + ch - th_, bw, th_)
+                cr.fill()
+                
+                # Draw completed bar (green) overlapping
+                cr.set_source_rgb(0.15, 0.68, 0.37)
+                cr.rectangle(bx, ay + ch - ch_, bw, ch_)
+                cr.fill()
+                
+                # Draw month labels (rotated)
                 cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.9); cr.set_font_size(10)
-                try: ms = datetime.strptime(mk, '%Y-%m').strftime('%b %y')
+                try: ms = datetime.strptime(mk, '%Y-%m').strftime('%b')
                 except: ms = mk
                 (tx, ty, tw_, th, dx, dy) = cr.text_extents(ms)
-                cr.move_to(ax - 8 - tw_ - tx, by + bh/2 + th/2 - ty); cr.show_text(ms)
-                vs = f"{int(c)}/{int(t)}"; cr.set_source_rgba(fg.red, fg.green, fg.blue, fg.alpha)
-                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(9)
-                (tx, ty, tw_, th, dx, dy) = cr.text_extents(vs)
-                cr.move_to(ax + max(tw, cw_) + 6, by + bh/2 + th/2 - ty); cr.show_text(vs)
+                
+                cr.save()
+                cr.move_to(bx + bw/2 + th/2, ay + ch + 10)
+                cr.rotate(math.pi / 2)
+                cr.show_text(ms)
+                cr.restore()
+                
+                # Draw values
+                if t > 0:
+                    vs = f"{int(c)}/{int(t)}"
+                    cr.set_source_rgba(fg.red, fg.green, fg.blue, fg.alpha)
+                    cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(8)
+                    (tx, ty, tw_, th, dx, dy) = cr.text_extents(vs)
+                    cr.move_to(bx + bw/2 - tw_/2 - tx, ay + ch - max(th_, ch_) - 5)
+                    cr.show_text(vs)
 
     def _calculate_monthly_data(self):
         monthly = defaultdict(lambda: {'completed': 0, 'total': 0})
+        
+        # Ensure last 12 months exist in data
+        today = date.today()
+        for i in range(12):
+            m = (today.month - i - 1) % 12 + 1
+            y = today.year + (today.month - i - 1) // 12
+            mk = f"{y}-{m:02}"
+            monthly[mk] = {'completed': 0, 'total': 0}
+
         for g in self._goals:
             cd, ed = g.get('completion_date', ''), g.get('end_date', '')
             if cd:
@@ -275,4 +310,271 @@ class GoalTrendWidget(Gtk.DrawingArea):
                             monthly[mk]['total'] += 1
                         except: pass
         return dict(sorted(monthly.items()))
+
+
+class NotificationWidget(Adw.Bin):
+    """Widget that shows notifications for overdue/upcoming tasks and progress alerts."""
+
+    def __init__(self):
+        super().__init__()
+        self._list_box = Gtk.ListBox()
+        self._list_box.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._list_box.add_css_class("boxed-list")
+        
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        label = Gtk.Label(label="Notifications")
+        label.add_css_class("title-4")
+        label.set_halign(Gtk.Align.START)
+        box.append(label)
+        box.append(self._list_box)
+        
+        self.set_child(box)
+        self._goals = []
+
+    def update_data(self, goals):
+        self._goals = goals
+        self._refresh()
+
+    def _refresh(self):
+        # Clear existing items
+        row = self._list_box.get_first_child()
+        while row:
+            next_row = row.get_next_sibling()
+            self._list_box.remove(row)
+            row = next_row
+
+        today = date.today()
+        week_later = today + timedelta(days=7)
+        
+        overdue = []
+        upcoming = [] # List of (date, text) tuples
+        any_completed_recently = False
+        
+        for g in self._goals:
+            # Check goal itself
+            if not g.get("completed"):
+                ed = g.get("end_date")
+                if ed:
+                    try:
+                        d = datetime.strptime(ed, "%Y-%m-%d").date()
+                        if d < today:
+                            overdue.append(f"Goal: {g['title']}")
+                        elif d <= week_later:
+                            upcoming.append((d, f"Goal: {g['title']}"))
+                    except: pass
+            else:
+                cd = g.get("completion_date")
+                if cd:
+                    try:
+                        d = datetime.strptime(cd, "%Y-%m-%d").date()
+                        if (today - d).days <= 7:
+                            any_completed_recently = True
+                    except: pass
+
+            # Check tasks
+            for t in g.get("tasks", []):
+                if not t.get("completed"):
+                    ted = t.get("end_date")
+                    if ted:
+                        try:
+                            d = datetime.strptime(ted, "%Y-%m-%d").date()
+                            if d < today:
+                                overdue.append(f"Task: {t['text']} ({g['title']})")
+                            elif d <= week_later:
+                                upcoming.append((d, f"Task: {t['text']} ({g['title']})"))
+                        except: pass
+                else:
+                    tcd = t.get("completion_date")
+                    if tcd:
+                        try:
+                            d = datetime.strptime(tcd, "%Y-%m-%d").date()
+                            if (today - d).days <= 7:
+                                any_completed_recently = True
+                        except: pass
+
+        # Add "Overdue" section
+        if overdue:
+            self._add_header("Overdue", "error")
+            for item in overdue:
+                self._add_item(item, "error")
+
+        # Add "Upcoming this week" section
+        if upcoming:
+            upcoming.sort(key=lambda x: x[0]) # Sort by date
+            self._add_header("Upcoming Week", "accent")
+            for d, text in upcoming:
+                # Format: ddd - notification
+                date_str = d.strftime("%a")
+                self._add_item(f"{date_str} - {text}")
+
+        # Alert if no progress
+        if not any_completed_recently and self._goals:
+            self._add_header("Alert", "warning")
+            self._add_item("No progress made in the last week!", "warning")
+
+        if not overdue and not upcoming and (any_completed_recently or not self._goals):
+            empty_row = Adw.ActionRow()
+            empty_row.set_title("No notifications")
+            empty_row.add_css_class("dim-label")
+            self._list_box.append(empty_row)
+
+    def _add_header(self, title, css_class=None):
+        row = Adw.ActionRow()
+        row.set_title(f"<b>{title}</b>")
+        row.set_use_markup(True)
+        if css_class:
+            row.add_css_class(css_class)
+        self._list_box.append(row)
+
+    def _add_item(self, text, css_class=None):
+        row = Adw.ActionRow()
+        row.set_title(text)
+        if css_class:
+            row.add_css_class(css_class)
+        self._list_box.append(row)
+
+
+class TimerWidget(Adw.Bin):
+    """Widget that shows a countdown timer to the next upcoming task or goal."""
+
+    def __init__(self):
+        super().__init__()
+        self._box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._box.set_halign(Gtk.Align.CENTER)
+        self._box.set_margin_top(10)
+        self._box.set_margin_bottom(10)
+        
+        self._title_label = Gtk.Label(label="Next Deadline")
+        self._title_label.add_css_class("dim-label")
+        self._title_label.add_css_class("caption")
+        self._box.append(self._title_label)
+        
+        # Timer columns box
+        self._timer_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
+        self._timer_box.set_halign(Gtk.Align.CENTER)
+        self._box.append(self._timer_box)
+        
+        # Helper to create units
+        def create_unit_box(label_text):
+            vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            vbox.set_halign(Gtk.Align.CENTER)
+            
+            num_label = Gtk.Label(label="00")
+            num_label.add_css_class("title-1")
+            num_label.set_markup("<span font_family='monospace' size='xx-large' weight='bold'>00</span>")
+            
+            desc_label = Gtk.Label(label=label_text)
+            desc_label.add_css_class("caption")
+            desc_label.add_css_class("dim-label")
+            
+            vbox.append(num_label)
+            vbox.append(desc_label)
+            return vbox, num_label
+
+        self._days_box, self._days_num = create_unit_box("DAYS")
+        self._hrs_box, self._hrs_num = create_unit_box("HRS")
+        self._min_box, self._min_num = create_unit_box("MIN")
+        self._sec_box, self._sec_num = create_unit_box("SEC")
+        
+        def create_colon():
+            lbl = Gtk.Label(label=":")
+            lbl.add_css_class("title-1")
+            lbl.set_valign(Gtk.Align.START)
+            lbl.set_margin_top(4)
+            return lbl
+
+        self._timer_box.append(self._days_box)
+        self._timer_box.append(create_colon())
+        self._timer_box.append(self._hrs_box)
+        self._timer_box.append(create_colon())
+        self._timer_box.append(self._min_box)
+        self._timer_box.append(create_colon())
+        self._timer_box.append(self._sec_box)
+        
+        self._item_label = Gtk.Label(label="No upcoming deadlines")
+        self._item_label.add_css_class("body")
+        self._item_label.set_margin_top(4)
+        self._box.append(self._item_label)
+        
+        self.set_child(self._box)
+        self._goals = []
+        self._next_deadline = None
+        self._next_item_title = ""
+        
+        # Start timer
+        GLib.timeout_add_seconds(1, self._on_tick)
+
+    def update_data(self, goals):
+        self._goals = goals
+        self._find_next_deadline()
+
+    def _find_next_deadline(self):
+        now = datetime.now()
+        upcoming = []
+        
+        for g in self._goals:
+            if not g.get("completed") and g.get("end_date"):
+                try:
+                    dt_str = g["end_date"]
+                    if g.get("end_time"):
+                        dt_str += " " + g["end_time"]
+                    else:
+                        dt_str += " 23:59:59"
+                    
+                    dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S") if " " in dt_str else datetime.strptime(dt_str, "%Y-%m-%d")
+                    if dt > now:
+                        upcoming.append((dt, f"Goal: {g['title']}"))
+                except: pass
+            
+            for t in g.get("tasks", []):
+                if not t.get("completed") and t.get("end_date"):
+                    try:
+                        dt_str = t["end_date"]
+                        if t.get("end_time"):
+                            dt_str += " " + t["end_time"]
+                        else:
+                            dt_str += " 23:59:59"
+                            
+                        dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S") if " " in dt_str else datetime.strptime(dt_str, "%Y-%m-%d")
+                        if dt > now:
+                            upcoming.append((dt, f"Task: {t['text']}"))
+                    except: pass
+        
+        if upcoming:
+            upcoming.sort(key=lambda x: x[0])
+            self._next_deadline, self._next_item_title = upcoming[0]
+            self._item_label.set_text(self._next_item_title)
+        else:
+            self._next_deadline = None
+            self._item_label.set_text("No upcoming deadlines")
+            self._reset_labels()
+
+    def _reset_labels(self):
+        for lbl in [self._days_num, self._hrs_num, self._min_num, self._sec_num]:
+            lbl.set_markup("<span font_family='monospace' size='xx-large' weight='bold'>00</span>")
+
+    def _on_tick(self):
+        if not self._next_deadline:
+            return True
+        
+        now = datetime.now()
+        diff = self._next_deadline - now
+        
+        if diff.total_seconds() <= 0:
+            self._find_next_deadline()
+            return True
+        
+        days = diff.days
+        hours, remainder = divmod(diff.seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        
+        def set_num(lbl, val):
+            lbl.set_markup(f"<span font_family='monospace' size='xx-large' weight='bold'>{val:02}</span>")
+
+        set_num(self._days_num, days)
+        set_num(self._hrs_num, hours)
+        set_num(self._min_num, minutes)
+        set_num(self._sec_num, seconds)
+        
+        return True
 

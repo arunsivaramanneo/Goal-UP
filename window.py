@@ -11,7 +11,7 @@ from gi.repository import Adw, Gtk, Gdk, Gio, GLib
 from goal_row import GoalRow
 from edit_dialog import EditGoalDialog
 from storage import load_tasks, save_tasks, export_to_ics, export_backup, import_backup
-from summary_widget import GoalPieChartsWidget, GoalTrendWidget
+from summary_widget import GoalPieChartsWidget, GoalTrendWidget, NotificationWidget, TimerWidget
 from timeline_widget import TimelineWidget
 from notification_manager import NotificationManager
 from datetime import datetime, date
@@ -124,7 +124,11 @@ class MainWindow(Adw.ApplicationWindow):
         content_box.set_margin_end(12)
         clamp.set_child(content_box)
 
-        # Pie Charts above entry section
+        # Timer at the top
+        self.timer_widget = TimerWidget()
+        content_box.append(self.timer_widget)
+
+        # Pie Charts
         self.pie_charts_widget = GoalPieChartsWidget()
         content_box.append(self.pie_charts_widget)
 
@@ -167,6 +171,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.empty_label.set_margin_bottom(24)
         content_box.append(self.empty_label)
 
+        # Summary Trend Widget below goals
+        self.summary_widget = GoalTrendWidget()
+        content_box.append(self.summary_widget)
+
         # Right sidebar separator
         right_separator = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
         content_horizontal_box.append(right_separator)
@@ -174,6 +182,8 @@ class MainWindow(Adw.ApplicationWindow):
         # Right sidebar as scrollable content
         right_scrolled = Gtk.ScrolledWindow()
         right_scrolled.set_vexpand(True)
+        right_scrolled.set_hexpand(False)
+        right_scrolled.set_size_request(350, -1) # Increase width to 350
         right_scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         content_horizontal_box.append(right_scrolled)
 
@@ -185,9 +195,9 @@ class MainWindow(Adw.ApplicationWindow):
         right_sidebar_box.set_margin_end(12)
         right_scrolled.set_child(right_sidebar_box)
 
-        # Summary Trend Widget as right sidebar
-        self.summary_widget = GoalTrendWidget()
-        right_sidebar_box.append(self.summary_widget)
+        # Notification Widget as right sidebar
+        self.notification_widget = NotificationWidget()
+        right_sidebar_box.append(self.notification_widget)
 
         # Trend widget no longer needed
         self.trend_widget = None
@@ -555,6 +565,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.pie_charts_widget.update_data(completed_goals, total_goals, completed_tasks, total_tasks, goals)
         self.summary_widget.update_data(goals)
         self.timeline_widget.update_data(goals)
+        self.timer_widget.update_data(goals)
+        self.notification_widget.update_data(goals)
 
     def _update_empty_state(self) -> None:
         """Show or hide the empty state message."""
