@@ -535,6 +535,14 @@ class GoalRow(Adw.ExpanderRow):
         # We need to preserve the "Add Task" row at the top.
         
         # 1. Identify hierarchy
+        # Sort _subtask_rows before building hierarchy to ensure consistent ordering within groups
+        self._subtask_rows.sort(key=lambda r: (
+            r.completed,
+            r.end_date == "",
+            r.end_date,
+            r.end_time
+        ))
+
         tasks_by_parent = {}
         top_level = []
         rows_by_id = {row.id: row for row in self._subtask_rows}

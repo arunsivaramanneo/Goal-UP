@@ -496,6 +496,14 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         # 2. Identify hierarchy
+        # Sort all_rows before building hierarchy to ensure consistent ordering within groups
+        all_rows.sort(key=lambda r: (
+            r.completed,
+            r.end_date == "",
+            r.end_date,
+            r.end_time
+        ))
+
         goals_by_parent = {}
         top_level = []
         rows_by_id = {r.id: r for r in all_rows}
