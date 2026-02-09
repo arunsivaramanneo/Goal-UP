@@ -269,6 +269,26 @@ class GoalTrendWidget(Gtk.DrawingArea):
                     (tx, ty, tw_, th, dx, dy) = cr.text_extents(vs)
                     cr.move_to(bx + bw/2 - tw_/2 - tx, ay + ch - max(th_, ch_) - 5)
                     cr.show_text(vs)
+            
+            # Draw Legend
+            lx, ly = ax + cw - 120, y - 5
+            
+            # Completed legend
+            cr.set_source_rgb(0.15, 0.68, 0.37)
+            cr.rectangle(lx, ly, 10, 10)
+            cr.fill()
+            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.8)
+            cr.set_font_size(10)
+            cr.move_to(lx + 15, ly + 9)
+            cr.show_text("Completed")
+            
+            # Total/Pending legend
+            cr.set_source_rgba(0.85, 0.85, 0.85, 0.9)
+            cr.rectangle(lx + 70, ly, 10, 10)
+            cr.fill()
+            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.8)
+            cr.move_to(lx + 85, ly + 9)
+            cr.show_text("Total")
 
     def _calculate_monthly_data(self):
         monthly = defaultdict(lambda: {'completed': 0, 'total': 0})
@@ -523,7 +543,7 @@ class TimerWidget(Adw.Bin):
                     
                     dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S") if " " in dt_str else datetime.strptime(dt_str, "%Y-%m-%d")
                     if dt > now:
-                        upcoming.append((dt, f"Goal: {g['title']}"))
+                        upcoming.append((dt, f"Goal - {g['title']}"))
                 except: pass
             
             for t in g.get("tasks", []):
@@ -537,7 +557,7 @@ class TimerWidget(Adw.Bin):
                             
                         dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S") if " " in dt_str else datetime.strptime(dt_str, "%Y-%m-%d")
                         if dt > now:
-                            upcoming.append((dt, f"Task: {t['text']}"))
+                            upcoming.append((dt, f"Task - {t['text']} ({g['title']})"))
                     except: pass
         
         if upcoming:

@@ -15,16 +15,17 @@ class EditGoalDialog(Adw.Dialog):
     __gtype_name__ = "EditGoalDialog"
 
     __gsignals__ = {
-        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str, str, str, str)),  # title, description, end_date, parent_id, color, end_time
+        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str, str, str, str, str)),  # title, description, end_date, parent_id, color, end_time, completion_date
     }
 
-    def __init__(self, title: str = "", description: str = "", end_date: str = "", parent_id: str = "", color: str = "", possible_parents: list[tuple[str, str]] = None, end_time: str = ""):
+    def __init__(self, title: str = "", description: str = "", end_date: str = "", parent_id: str = "", color: str = "", possible_parents: list[tuple[str, str]] = None, end_time: str = "", completion_date: str = ""):
         super().__init__()
 
         self._parent_id = parent_id
         self._possible_parents = possible_parents or [] # List of (id, title)
         self._initial_color = color or "rgb(53,132,228)"
         self._chosen_time = end_time
+        self._chosen_completion_date = completion_date
 
         self.set_title("Edit Goal")
         self.set_content_width(400)
@@ -132,6 +133,31 @@ class EditGoalDialog(Adw.Dialog):
         clear_time_btn.connect("clicked", self._on_clear_time_clicked)
         self.time_row.add_suffix(clear_time_btn)
 
+        # Completion date group (optional)
+        comp_date_group = Adw.PreferencesGroup()
+        comp_date_group.set_title("Completion Date (Optional)")
+        content_box.append(comp_date_group)
+
+        self.comp_date_row = Adw.ActionRow()
+        self.comp_date_row.set_title("Completion Date")
+        self.comp_date_row.set_subtitle(completion_date or "Not completed")
+        comp_date_group.add(self.comp_date_row)
+
+        # Completion date picker button
+        self.pick_comp_date_btn = Gtk.Button()
+        self.pick_comp_date_btn.set_icon_name("calendar-check-symbolic")
+        self.pick_comp_date_btn.set_valign(Gtk.Align.CENTER)
+        self.pick_comp_date_btn.add_css_class("flat")
+        self.pick_comp_date_btn.connect("clicked", self._on_pick_comp_date_clicked)
+        self.comp_date_row.add_suffix(self.pick_comp_date_btn)
+
+        # Clear completion date button
+        clear_comp_date_btn = Gtk.Button(label="Clear")
+        clear_comp_date_btn.add_css_class("flat")
+        clear_comp_date_btn.set_valign(Gtk.Align.CENTER)
+        clear_comp_date_btn.connect("clicked", self._on_clear_comp_date_clicked)
+        self.comp_date_row.add_suffix(clear_comp_date_btn)
+
         # Parent Selection group (Optional)
         parent_group = Adw.PreferencesGroup()
         parent_group.set_title("Dependency")
@@ -214,6 +240,36 @@ class EditGoalDialog(Adw.Dialog):
         """Clear the chosen date."""
         self._chosen_date = ""
         self.date_row.set_subtitle("No date set")
+
+    def _on_pick_comp_date_clicked(self, button: Gtk.Button) -> None:
+        """Open a calendar popover for completion date."""
+        self._comp_popover = Gtk.Popover()
+        self._comp_popover.set_parent(button)
+        self._comp_popover.set_autohide(True)
+        
+        calendar = Gtk.Calendar()
+        if self._chosen_completion_date:
+            try:
+                dt = datetime.strptime(self._chosen_completion_date, "%Y-%m-%d")
+                gdt = GLib.DateTime.new_local(dt.year, dt.month, dt.day, 0, 0, 0)
+                calendar.select_day(gdt)
+            except: pass
+                
+        calendar.connect("day-selected", self._on_comp_day_selected, self._comp_popover)
+        self._comp_popover.set_child(calendar)
+        self._comp_popover.popup()
+
+    def _on_comp_day_selected(self, calendar: Gtk.Calendar, popover: Gtk.Popover) -> None:
+        """Handle completion date selection."""
+        gdt = calendar.get_date()
+        self._chosen_completion_date = f"{gdt.get_year():04d}-{gdt.get_month():02d}-{gdt.get_day_of_month():02d}"
+        self.comp_date_row.set_subtitle(self._chosen_completion_date)
+        popover.popdown()
+
+    def _on_clear_comp_date_clicked(self, button: Gtk.Button) -> None:
+        """Clear the completion date."""
+        self._chosen_completion_date = ""
+        self.comp_date_row.set_subtitle("Not completed")
 
     def _on_pick_time_clicked(self, button: Gtk.Button) -> None:
         """Open a time picker popover."""
@@ -298,7 +354,7 @@ class EditGoalDialog(Adw.Dialog):
         
         if title:
             color = self.color_button.get_rgba().to_string()
-            self.emit("save", title, description, end_date, parent_id, color, self._chosen_time)
+            self.emit("save", title, description, end_date, parent_id, color, self._chosen_time, self._chosen_completion_date)
             self.close()
 
 
@@ -308,15 +364,16 @@ class EditTaskDialog(Adw.Dialog):
     __gtype_name__ = "EditTaskDialog"
 
     __gsignals__ = {
-        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str, str)),  # text, end_date, parent_id, end_time
+        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str, str, str)),  # text, end_date, parent_id, end_time, completion_date
     }
 
-    def __init__(self, text: str = "", end_date: str = "", parent_id: str = "", possible_parents: list[tuple[str, str]] = None, end_time: str = ""):
+    def __init__(self, text: str = "", end_date: str = "", parent_id: str = "", possible_parents: list[tuple[str, str]] = None, end_time: str = "", completion_date: str = ""):
         super().__init__()
 
         self._parent_id = parent_id
         self._possible_parents = possible_parents or []
         self._chosen_time = end_time
+        self._chosen_completion_date = completion_date
 
         self.set_title("Edit Task")
         self.set_content_width(400)
@@ -414,6 +471,31 @@ class EditTaskDialog(Adw.Dialog):
         clear_time_btn.connect("clicked", self._on_clear_time_clicked)
         self.time_row.add_suffix(clear_time_btn)
 
+        # Completion date group (optional)
+        comp_date_group = Adw.PreferencesGroup()
+        comp_date_group.set_title("Completion Date (Optional)")
+        content_box.append(comp_date_group)
+
+        self.comp_date_row = Adw.ActionRow()
+        self.comp_date_row.set_title("Completion Date")
+        self.comp_date_row.set_subtitle(completion_date or "Not completed")
+        comp_date_group.add(self.comp_date_row)
+
+        # Completion date picker button
+        self.pick_comp_date_btn = Gtk.Button()
+        self.pick_comp_date_btn.set_icon_name("calendar-check-symbolic")
+        self.pick_comp_date_btn.set_valign(Gtk.Align.CENTER)
+        self.pick_comp_date_btn.add_css_class("flat")
+        self.pick_comp_date_btn.connect("clicked", self._on_pick_comp_date_clicked)
+        self.comp_date_row.add_suffix(self.pick_comp_date_btn)
+
+        # Clear completion date button
+        clear_comp_date_btn = Gtk.Button(label="Clear")
+        clear_comp_date_btn.add_css_class("flat")
+        clear_comp_date_btn.set_valign(Gtk.Align.CENTER)
+        clear_comp_date_btn.connect("clicked", self._on_clear_comp_date_clicked)
+        self.comp_date_row.add_suffix(clear_comp_date_btn)
+
         # Parent Selection group (Optional)
         parent_group = Adw.PreferencesGroup()
         parent_group.set_title("Dependency")
@@ -475,6 +557,36 @@ class EditTaskDialog(Adw.Dialog):
         """Clear the chosen date."""
         self._chosen_date = ""
         self.date_row.set_subtitle("No date set")
+
+    def _on_pick_comp_date_clicked(self, button: Gtk.Button) -> None:
+        """Open a calendar popover for completion date."""
+        self._comp_popover = Gtk.Popover()
+        self._comp_popover.set_parent(button)
+        self._comp_popover.set_autohide(True)
+        
+        calendar = Gtk.Calendar()
+        if self._chosen_completion_date:
+            try:
+                dt = datetime.strptime(self._chosen_completion_date, "%Y-%m-%d")
+                gdt = GLib.DateTime.new_local(dt.year, dt.month, dt.day, 0, 0, 0)
+                calendar.select_day(gdt)
+            except: pass
+                
+        calendar.connect("day-selected", self._on_comp_day_selected, self._comp_popover)
+        self._comp_popover.set_child(calendar)
+        self._comp_popover.popup()
+
+    def _on_comp_day_selected(self, calendar: Gtk.Calendar, popover: Gtk.Popover) -> None:
+        """Handle completion date selection."""
+        gdt = calendar.get_date()
+        self._chosen_completion_date = f"{gdt.get_year():04d}-{gdt.get_month():02d}-{gdt.get_day_of_month():02d}"
+        self.comp_date_row.set_subtitle(self._chosen_completion_date)
+        popover.popdown()
+
+    def _on_clear_comp_date_clicked(self, button: Gtk.Button) -> None:
+        """Clear the completion date."""
+        self._chosen_completion_date = ""
+        self.comp_date_row.set_subtitle("Not completed")
 
     def _on_pick_time_clicked(self, button: Gtk.Button) -> None:
         """Open a time picker popover."""
@@ -557,5 +669,5 @@ class EditTaskDialog(Adw.Dialog):
             parent_id = self._possible_parents[parent_idx - 1][0]
 
         if text:
-            self.emit("save", text, end_date, parent_id, self._chosen_time)
+            self.emit("save", text, end_date, parent_id, self._chosen_time, self._chosen_completion_date)
             self.close()

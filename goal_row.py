@@ -35,7 +35,7 @@ class SubTaskRow(Adw.ActionRow):
         self._completed = completed
         self._end_date = end_date
         self._end_time = end_time
-        self._completion_date = ""  # Will be set when completed
+        self._completion_date = ""  # Initialized later if provided
 
         self.set_title(text)
         self.set_margin_start(self._depth * 24)
@@ -143,7 +143,7 @@ class SubTaskRow(Adw.ActionRow):
                 if t_id != self._id and t_id not in descendants:
                     possible_parents.append((t_id, t_text))
 
-        dialog = EditTaskDialog(self._text, self._end_date, self._parent_id, possible_parents, self._end_time)
+        dialog = EditTaskDialog(self._text, self._end_date, self._parent_id, possible_parents, self._end_time, self._completion_date)
         dialog.connect("save", self._on_edit_save)
         # Find the root window to present the dialog
         root = self.get_root()
@@ -180,11 +180,20 @@ class SubTaskRow(Adw.ActionRow):
                         to_check.append(t["id"])
         return descendants
 
-    def _on_edit_save(self, dialog: EditTaskDialog, text: str, end_date: str, parent_id: str, end_time: str) -> None:
+    def _on_edit_save(self, dialog: EditTaskDialog, text: str, end_date: str, parent_id: str, end_time: str, completion_date: str) -> None:
         self._text = text
         self._end_date = end_date
         self._end_time = end_time
         self._parent_id = parent_id
+        self._completion_date = completion_date
+        if self._completion_date and not self._completed:
+            # If user manually sets a completion date, mark as completed
+            self.check_button.set_active(True)
+            self._completed = True
+        elif not self._completion_date and self._completed:
+             # If user clears completion date, mark as incomplete
+             self.check_button.set_active(False)
+             self._completed = False
         self._update_days_remaining()
         self._update_style()
         self.emit("task-changed", self._text)
@@ -205,12 +214,8 @@ class SubTaskRow(Adw.ActionRow):
 
     def _update_days_remaining(self) -> None:
         """Update the days remaining label based on end date and completion status."""
-        if self._completed:
-            if self._completion_date:
-                self.remaining_label.set_label(f"Completed on {self._completion_date}")
-            else:
-                self.remaining_label.set_label("Completed")
-            self.remaining_label.remove_css_class("error")
+        if not self._end_date and not self._completed:
+            self.remaining_label.set_label("")
             return
 
         if not self._end_date:
@@ -231,6 +236,14 @@ class SubTaskRow(Adw.ActionRow):
                 
         except (ValueError, TypeError):
             self.remaining_label.set_label("")
+            
+        # Update completion info if completed
+        if self._completed:
+            if self._completion_date:
+                self.remaining_label.set_label(f"Completed on {self._completion_date}")
+            else:
+                self.remaining_label.set_label("Completed")
+            self.remaining_label.remove_css_class("error")
 
 
 class GoalRow(Adw.ExpanderRow):
@@ -258,7 +271,7 @@ class GoalRow(Adw.ExpanderRow):
         self._created_at = created_at or datetime.now().isoformat()
         self._end_date = end_date or ""
         self._end_time = end_time or ""
-        self._completion_date = ""  # Will be set when completed
+        self._completion_date = ""  # Initialized later if provided
         self._color = color or "rgb(53,132,228)" # Default blue
 
         self.set_title(title)
@@ -453,13 +466,22 @@ class GoalRow(Adw.ExpanderRow):
     def color(self) -> str:
         return self._color
 
-    def update_details(self, title: str, description: str, end_date: str = "", parent_id: str = "", color: str = None, end_time: str = "") -> None:
-        """Update goal title, description, end date, parent, color, and end time."""
+    def update_details(self, title: str, description: str, end_date: str = "", parent_id: str = "", color: str = None, end_time: str = "", completion_date: str = "") -> None:
+        """Update goal details including completion date."""
         self._title = title
         self._description = description
         self._end_date = end_date
         self._end_time = end_time
         self._parent_id = parent_id
+        self._completion_date = completion_date
+        
+        if self._completion_date and not self._completed:
+            self.check_button.set_active(True)
+            self._completed = True
+        elif not self._completion_date and self._completed:
+            self.check_button.set_active(False)
+            self._completed = False
+
         if color:
             self._color = color
             self.color_indicator.queue_draw()
@@ -596,8 +618,6 @@ class GoalRow(Adw.ExpanderRow):
             self._completion_date = date.today().isoformat()
         else:
             self._completion_date = ""
-        self._update_days_remaining()
-        self._update_subtitle()
         self._update_style()
         self.emit("goal-changed")
 
@@ -685,5 +705,12 @@ class GoalRow(Adw.ExpanderRow):
                 
         except (ValueError, TypeError):
             self.remaining_label.set_label("")
+        
+        if self._completed:
+            if self._completion_date:
+                self.remaining_label.set_label(f"Completed on {self._completion_date}")
+            else:
+                self.remaining_label.set_label("Completed")
+            self.remaining_label.remove_css_class("error")
         
         self._update_subtitle()

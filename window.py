@@ -417,13 +417,13 @@ class MainWindow(Adw.ApplicationWindow):
             if g["id"] != row.id and g["id"] not in descendants:
                 possible_parents.append((g["id"], g["title"]))
 
-        dialog = EditGoalDialog(row.goal_title, row.description, row.end_date, row.parent_id, row.color, possible_parents, row.end_time)
+        dialog = EditGoalDialog(row.goal_title, row.description, row.end_date, row.parent_id, row.color, possible_parents, row.end_time, getattr(row, "_completion_date", ""))
         dialog.connect("save", self._on_edit_save, row)
         dialog.present(self)
 
-    def _on_edit_save(self, dialog: EditGoalDialog, title: str, description: str, end_date: str, parent_id: str, color: str, end_time: str, row: GoalRow) -> None:
+    def _on_edit_save(self, dialog: EditGoalDialog, title: str, description: str, end_date: str, parent_id: str, color: str, end_time: str, completion_date: str, row: GoalRow) -> None:
         """Handle save from edit dialog."""
-        row.update_details(title, description, end_date, parent_id, color, end_time)
+        row.update_details(title, description, end_date, parent_id, color, end_time, completion_date)
         self._reorder_goals()
         self._save_goals()
 
