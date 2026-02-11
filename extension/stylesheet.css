@@ -1,0 +1,10 @@
+.goal-up-panel-label {
+    margin-left: 5px;
+    font-weight: bold;
+}
+
+.goal-up-footer {
+    padding: 10px;
+    font-size: 10pt;
+    color: rgba(255, 255, 255, 0.7);
+}

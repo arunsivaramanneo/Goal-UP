@@ -5,6 +5,7 @@ INSTALL_DIR="$HOME/.local/share/goal-up"
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/applications"
 ICON_DIR="$HOME/.local/share/icons/hicolor/128x128/apps"
+EXTENSION_DIR="$HOME/.local/share/gnome-shell/extensions/goal-up@neothenoone"
 
 echo "Installing Goal UP..."
 
@@ -13,6 +14,7 @@ mkdir -p "$INSTALL_DIR"
 mkdir -p "$BIN_DIR"
 mkdir -p "$APP_DIR"
 mkdir -p "$ICON_DIR"
+mkdir -p "$EXTENSION_DIR"
 
 # Copy source files
 echo "Copying application files..."
@@ -34,6 +36,10 @@ fi
 echo "Installing desktop entry..."
 cp goal-up.desktop "$APP_DIR/"
 
+# Copy extension files
+echo "Installing GNOME extension..."
+cp extension/extension.js extension/metadata.json extension/stylesheet.css "$EXTENSION_DIR/"
+
 # Update desktop database if available
 if command -v update-desktop-database >/dev/null 2>&1; then
   echo "Updating desktop database..."
@@ -52,3 +58,6 @@ chmod +x "$BIN_DIR/goal-up"
 
 echo "Installation complete!"
 echo "Run 'goal-up' or find it in your application menu."
+echo "Note: To enable the GNOME extension, search for 'Extensions' in your menu or run:"
+echo "gnome-extensions enable goal-up@neothenoone"
+echo "You may need to restart GNOME Shell (Alt+F2, then type 'r' and Enter) if it doesn't appear."
