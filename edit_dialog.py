@@ -29,7 +29,7 @@ class EditGoalDialog(Adw.Dialog):
 
         self.set_title("Edit Goal")
         self.set_content_width(400)
-        self.set_content_height(450)
+        self.set_content_height(550)
 
         # Main layout
         toolbar_view = Adw.ToolbarView()
@@ -364,20 +364,22 @@ class EditTaskDialog(Adw.Dialog):
     __gtype_name__ = "EditTaskDialog"
 
     __gsignals__ = {
-        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str, str, str)),  # text, end_date, parent_id, end_time, completion_date
+        "save": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str, str, str, str, str)),  # text, end_date, parent_id, end_time, completion_date, recurrence, recurrence_days
     }
 
-    def __init__(self, text: str = "", end_date: str = "", parent_id: str = "", possible_parents: list[tuple[str, str]] = None, end_time: str = "", completion_date: str = ""):
+    def __init__(self, text: str = "", end_date: str = "", parent_id: str = "", possible_parents: list[tuple[str, str]] = None, end_time: str = "", completion_date: str = "", recurrence: str = "none", recurrence_days: str = ""):
         super().__init__()
 
         self._parent_id = parent_id
         self._possible_parents = possible_parents or []
         self._chosen_time = end_time
         self._chosen_completion_date = completion_date
+        self._recurrence = recurrence or "none"
+        self._recurrence_days = recurrence_days or ""
 
         self.set_title("Edit Task")
         self.set_content_width(400)
-        self.set_content_height(400)
+        self.set_content_height(500)
 
         # Main layout
         toolbar_view = Adw.ToolbarView()
@@ -518,7 +520,58 @@ class EditTaskDialog(Adw.Dialog):
         self.parent_row.set_selected(selected_index)
         parent_group.add(self.parent_row)
 
+        # Reminder group
+        reminder_group = Adw.PreferencesGroup()
+        reminder_group.set_title("Reminder")
+        content_box.append(reminder_group)
+
+        self.recurrence_row = Adw.ComboRow()
+        self.recurrence_row.set_title("Type")
+        recurrence_model = Gtk.StringList()
+        recurrence_options = ["None", "Daily", "Weekly", "Monthly"]
+        for opt in recurrence_options:
+            recurrence_model.append(opt)
+        
+        self.recurrence_row.set_model(recurrence_model)
+        
+        # Set selected recurrence
+        initial_recurrence_idx = 0
+        if self._recurrence.lower() in [o.lower() for o in recurrence_options]:
+            initial_recurrence_idx = [o.lower() for o in recurrence_options].index(self._recurrence.lower())
+        self.recurrence_row.set_selected(initial_recurrence_idx)
+        self.recurrence_row.connect("notify::selected", self._on_recurrence_changed)
+        reminder_group.add(self.recurrence_row)
+
+        # Days of week for weekly recurrence
+        self.days_row = Adw.ActionRow()
+        self.days_row.set_title("Days of Week")
+        self.days_row.set_visible(self._recurrence.lower() == "weekly")
+        reminder_group.add(self.days_row)
+
+        days_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        days_box.set_valign(Gtk.Align.CENTER)
+        self.days_row.add_suffix(days_box)
+
+        self.day_buttons = []
+        day_labels = ["M", "T", "W", "T", "F", "S", "S"]
+        active_days = self._recurrence_days.split(",") if self._recurrence_days else []
+        
+        for i, label in enumerate(day_labels):
+            btn = Gtk.ToggleButton(label=label)
+            btn.add_css_class("circular")
+            if str(i) in active_days:
+                btn.set_active(True)
+            days_box.append(btn)
+            self.day_buttons.append(btn)
+
         self._chosen_date = end_date
+
+    def _on_recurrence_changed(self, row: Adw.ComboRow, pspec) -> None:
+        """Handle recurrence change."""
+        selected_idx = row.get_selected()
+        # Options: None, Daily, Weekly, Monthly
+        # Weekly is index 2
+        self.days_row.set_visible(selected_idx == 2)
 
     def _on_pick_date_clicked(self, button: Gtk.Button) -> None:
         """Open a calendar popover."""
@@ -669,5 +722,16 @@ class EditTaskDialog(Adw.Dialog):
             parent_id = self._possible_parents[parent_idx - 1][0]
 
         if text:
-            self.emit("save", text, end_date, parent_id, self._chosen_time, self._chosen_completion_date)
+            # Get recurrence info
+            recurrence_idx = self.recurrence_row.get_selected()
+            recurrence_options = ["none", "daily", "weekly", "monthly"]
+            recurrence = recurrence_options[recurrence_idx]
+            
+            recurrence_days_list = []
+            for i, btn in enumerate(self.day_buttons):
+                if btn.get_active():
+                    recurrence_days_list.append(str(i))
+            recurrence_days = ",".join(recurrence_days_list)
+
+            self.emit("save", text, end_date, parent_id, self._chosen_time, self._chosen_completion_date, recurrence, recurrence_days)
             self.close()

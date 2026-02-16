@@ -288,7 +288,7 @@ class GoalTrendWidget(Gtk.DrawingArea):
             cr.fill()
             cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.8)
             cr.move_to(lx + 85, ly + 9)
-            cr.show_text("Total")
+            cr.show_text("Pending")
 
     def _calculate_monthly_data(self):
         monthly = defaultdict(lambda: {'completed': 0, 'total': 0})
@@ -393,15 +393,19 @@ class NotificationWidget(Adw.Bin):
 
             # Check tasks
             for t in g.get("tasks", []):
+                is_recurring = t.get("recurrence", "none") != "none"
+                recur_sym = " 🔄" if is_recurring else ""
+                label_prefix = "Reminder:" if is_recurring else "Task:"
+                
                 if not t.get("completed"):
                     ted = t.get("end_date")
                     if ted:
                         try:
                             d = datetime.strptime(ted, "%Y-%m-%d").date()
                             if d < today:
-                                overdue.append(f"Task: {t['text']} ({g['title']})")
+                                overdue.append(f"{label_prefix} {t['text']} ({g['title']}){recur_sym}")
                             elif d <= week_later:
-                                upcoming.append((d, f"Task: {t['text']} ({g['title']})"))
+                                upcoming.append((d, f"{label_prefix} {t['text']} ({g['title']}){recur_sym}"))
                         except: pass
                 else:
                     tcd = t.get("completion_date")
@@ -411,6 +415,61 @@ class NotificationWidget(Adw.Bin):
                             if (today - d).days <= 7:
                                 any_completed_recently = True
                         except: pass
+
+                # Project future recurring task instances
+                # Project future recurring task instances
+                if is_recurring:
+                    try:
+                        # Determine starting point for projection: task creation or today
+                        created_str = t.get("created_at")
+                        if created_str:
+                            # Handle potential ISO format with T separator or just date
+                            if "T" in created_str:
+                                start_date = datetime.strptime(created_str.split("T")[0], "%Y-%m-%d").date()
+                            else:
+                                start_date = datetime.strptime(created_str, "%Y-%m-%d").date()
+                        else:
+                            start_date = today
+
+                        # Boundary for stopping projection
+                        task_end = None
+                        if t.get("end_date"):
+                            try:
+                                task_end = datetime.strptime(t["end_date"], "%Y-%m-%d").date()
+                            except: pass
+
+                        # Projection loop starting from created_at
+                        # We calculate all occurrences and only show those in the upcoming week
+                        projection_date = start_date - timedelta(days=1)
+                        found_count = 0
+                        
+                        while True:
+                            next_date = self._calculate_next_date(projection_date, t.get("recurrence"), t.get("recurrence_days"))
+                            
+                            # Break if logic fails or we passed both the task end and the week boundary
+                            if not next_date: break
+                            if next_date > week_later: break
+                            if task_end and next_date > task_end: break
+
+                            # Only show occurrences from today onwards
+                            if next_date >= today:
+                                if not t.get("completed") or next_date > today: # Show today's if incomplete
+                                    # Avoid duplicates
+                                    exists = any(u[0] == next_date and t['text'] in u[1] for u in upcoming)
+                                    if not exists:
+                                        upcoming.append((next_date, f"{label_prefix} {t['text']} ({g['title']}){recur_sym}"))
+                                        found_count += 1
+                                        
+                                        # Limit daily as requested
+                                        if t.get("recurrence") == "daily":
+                                            break
+                            
+                            projection_date = next_date
+                            # Safety break to prevent infinite loops if logic has bugs
+                            if projection_date > week_later + timedelta(days=365): break
+
+                    except Exception as e:
+                        print(f"Error projecting recurring task: {e}")
 
         # Add "Overdue" section
         if overdue:
@@ -452,6 +511,37 @@ class NotificationWidget(Adw.Bin):
         if css_class:
             row.add_css_class(css_class)
         self._list_box.append(row)
+
+    def _calculate_next_date(self, current_date, recurrence, recurrence_days):
+        """Calculate the next date based on recurrence rules (Same logic as GoalRow)."""
+        if recurrence == "daily":
+            return current_date + timedelta(days=1)
+        
+        elif recurrence == "monthly":
+            # Rough monthly jump
+            month = current_date.month % 12 + 1
+            year = current_date.year + (current_date.month // 12)
+            try:
+                return current_date.replace(year=year, month=month)
+            except ValueError:
+                # Handle end of month issues
+                return (current_date.replace(day=1) + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+                
+        elif recurrence == "weekly":
+            if not recurrence_days:
+                return current_date + timedelta(days=7)
+            
+            allowed_days = [int(d) for d in recurrence_days.split(",") if d.strip()]
+            if not allowed_days:
+                return current_date + timedelta(days=7)
+            
+            # Find next allowed day
+            for i in range(1, 8):
+                next_candidate = current_date + timedelta(days=i)
+                if next_candidate.weekday() in allowed_days:
+                    return next_candidate
+                    
+        return None
 
 
 class TimerWidget(Adw.Bin):

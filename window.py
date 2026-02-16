@@ -350,7 +350,9 @@ class MainWindow(Adw.ApplicationWindow):
                     "created_at": row.created_at,
                     "end_date": row.end_date,
                     "completion_date": getattr(row, "_completion_date", ""),
-                    "color": row.color
+                    "color": row.color,
+                    "recurrence": row.recurrence,
+                    "recurrence_days": row.recurrence_days
                 })
             row = row.get_next_sibling()
         return goals
@@ -378,12 +380,13 @@ class MainWindow(Adw.ApplicationWindow):
         rgba.alpha = 1.0
         self.color_button.set_rgba(rgba)
 
-    def _add_goal(self, title: str, description: str, completed: bool, tasks: list, created_at: str = None, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, color: str = None, end_time: str = "") -> None:
+    def _add_goal(self, title: str, description: str, completed: bool, tasks: list, created_at: str = None, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, color: str = None, end_time: str = "", recurrence: str = "none", recurrence_days: str = "") -> None:
         """Add a new goal to the list."""
-        row = GoalRow(title, description, completed, tasks, created_at, end_date, id, parent_id, depth, color=color, end_time=end_time)
+        row = GoalRow(title, description, completed, tasks, created_at, end_date, id, parent_id, depth, color=color, end_time=end_time, recurrence=recurrence, recurrence_days=recurrence_days)
         row.connect("goal-changed", self._on_goal_changed)
         row.connect("goal-deleted", self._on_goal_deleted)
         row.connect("edit-requested", self._on_edit_requested)
+        row.connect("reminder-set", self._on_reminder_set)
         self.goal_list.append(row)
 
     def _on_goal_changed(self, row: GoalRow) -> None:
@@ -395,6 +398,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.goal_list.remove(row)
         self._save_goals()
         self._update_empty_state()
+
+    def _on_reminder_set(self, row: GoalRow, task_text: str, date_str: str) -> None:
+        """Handle reminder-set signal from a goal row."""
+        title = "Reminder Set"
+        body = f"Reminder set for '{task_text}' on {date_str}"
+        self.notification_manager.send_notification(title, body, "reminder-set-feedback")
 
     def _on_edit_requested(self, row: GoalRow) -> None:
         """Handle edit request for a goal."""
@@ -414,7 +423,6 @@ class MainWindow(Adw.ApplicationWindow):
                         to_check.append(g["id"])
         
         for g in all_goals:
-            if g["id"] != row.id and g["id"] not in descendants:
                 possible_parents.append((g["id"], g["title"]))
 
         dialog = EditGoalDialog(row.goal_title, row.description, row.end_date, row.parent_id, row.color, possible_parents, row.end_time, getattr(row, "_completion_date", ""))
@@ -449,7 +457,9 @@ class MainWindow(Adw.ApplicationWindow):
                 goal.get("parent_id", ""),
                 goal.get("depth", 0),
                 goal.get("color", None),
-                goal.get("end_time", "")
+                goal.get("end_time", ""),
+                goal.get("recurrence") or "none",
+                goal.get("recurrence_days") or ""
             )
             if goal.get("completion_date"):
                 row = self.goal_list.get_last_child()
@@ -476,7 +486,9 @@ class MainWindow(Adw.ApplicationWindow):
                     "end_date": row.end_date,
                     "end_time": row.end_time,
                     "completion_date": getattr(row, "_completion_date", ""),
-                    "color": row.color
+                    "color": row.color,
+                    "recurrence": row.recurrence,
+                    "recurrence_days": row.recurrence_days
                 })
             row = row.get_next_sibling()
         save_tasks(goals)

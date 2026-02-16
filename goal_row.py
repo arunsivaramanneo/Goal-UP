@@ -9,9 +9,8 @@ from gi.repository import Adw, Gtk, Gdk, GObject
 import cairo
 
 import uuid
-from datetime import datetime, date
-
 from edit_dialog import EditTaskDialog
+from datetime import datetime, date, timedelta
 
 
 class SubTaskRow(Adw.ActionRow):
@@ -23,9 +22,10 @@ class SubTaskRow(Adw.ActionRow):
         "task-toggled": (GObject.SignalFlags.RUN_FIRST, None, (bool,)),
         "task-deleted": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "task-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        "reminder-set": (GObject.SignalFlags.RUN_FIRST, None, (str,)), # date string
     }
 
-    def __init__(self, text: str, completed: bool = False, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, end_time: str = ""):
+    def __init__(self, text: str, completed: bool = False, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, end_time: str = "", recurrence: str = "none", recurrence_days: str = "", created_at: str = None):
         super().__init__()
 
         self._id = id or uuid.uuid4().hex
@@ -33,9 +33,12 @@ class SubTaskRow(Adw.ActionRow):
         self._depth = depth
         self._text = text
         self._completed = completed
+        self._created_at = created_at or datetime.now().isoformat()
         self._end_date = end_date
         self._end_time = end_time
         self._completion_date = ""  # Initialized later if provided
+        self._recurrence = recurrence or "none"
+        self._recurrence_days = recurrence_days or ""
 
         self.set_title(text)
         self.set_margin_start(self._depth * 24)
@@ -103,9 +106,21 @@ class SubTaskRow(Adw.ActionRow):
     def parent_id(self) -> str:
         return self._parent_id
 
+    @property
+    def created_at(self) -> str:
+        return self._created_at
+
     @parent_id.setter
     def parent_id(self, value: str) -> None:
         self._parent_id = value
+
+    @property
+    def recurrence(self) -> str:
+        return self._recurrence
+
+    @property
+    def recurrence_days(self) -> str:
+        return self._recurrence_days
 
     @property
     def depth(self) -> int:
@@ -127,7 +142,29 @@ class SubTaskRow(Adw.ActionRow):
         self.emit("task-toggled", self._completed)
 
     def _on_delete_clicked(self, button: Gtk.Button) -> None:
-        self.emit("task-deleted")
+        """Show confirmation dialog before deletion."""
+        dialog = Adw.MessageDialog(
+            heading="Delete Task?",
+            body="Are you sure you want to delete this task? This action cannot be undone."
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("delete", "Delete")
+        
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        
+        dialog.connect("response", self._on_delete_response)
+        
+        # Present dialog
+        root = self.get_root()
+        if root:
+            dialog.set_transient_for(root); dialog.present()
+            
+    def _on_delete_response(self, dialog: Adw.MessageDialog, response: str) -> None:
+        """Handle delete confirmation response."""
+        if response == "delete":
+            self.emit("task-deleted")
 
     def _on_edit_clicked(self, button: Gtk.Button) -> None:
         # Get list of possible parents (all OTHER tasks in this goal to avoid cycles for now)
@@ -143,7 +180,7 @@ class SubTaskRow(Adw.ActionRow):
                 if t_id != self._id and t_id not in descendants:
                     possible_parents.append((t_id, t_text))
 
-        dialog = EditTaskDialog(self._text, self._end_date, self._parent_id, possible_parents, self._end_time, self._completion_date)
+        dialog = EditTaskDialog(self._text, self._end_date, self._parent_id, possible_parents, self._end_time, self._completion_date, self._recurrence, self._recurrence_days)
         dialog.connect("save", self._on_edit_save)
         # Find the root window to present the dialog
         root = self.get_root()
@@ -180,12 +217,14 @@ class SubTaskRow(Adw.ActionRow):
                         to_check.append(t["id"])
         return descendants
 
-    def _on_edit_save(self, dialog: EditTaskDialog, text: str, end_date: str, parent_id: str, end_time: str, completion_date: str) -> None:
+    def _on_edit_save(self, dialog: EditTaskDialog, text: str, end_date: str, parent_id: str, end_time: str, completion_date: str, recurrence: str, recurrence_days: str) -> None:
         self._text = text
         self._end_date = end_date
         self._end_time = end_time
         self._parent_id = parent_id
         self._completion_date = completion_date
+        self._recurrence = recurrence or "none"
+        self._recurrence_days = recurrence_days or ""
         if self._completion_date and not self._completed:
             # If user manually sets a completion date, mark as completed
             self.check_button.set_active(True)
@@ -196,6 +235,11 @@ class SubTaskRow(Adw.ActionRow):
              self._completed = False
         self._update_days_remaining()
         self._update_style()
+        
+        # Check if reminder was just set or updated
+        if self._recurrence != "none" and self._end_date:
+            self.emit("reminder-set", self._end_date)
+            
         self.emit("task-changed", self._text)
         # Re-trigger reordering in parent goal
         parent_goal = self._get_parent_goal()
@@ -203,14 +247,15 @@ class SubTaskRow(Adw.ActionRow):
             parent_goal.reorder_tasks()
 
     def _update_style(self) -> None:
+        recur_sym = " 🔄" if self._recurrence != "none" else ""
         if self._completed:
             self.add_css_class("dim-label")
-            self.set_title(f"<s>{self._text}</s>")
+            self.set_title(f"<s>{self._text}{recur_sym}</s>")
             self.set_use_markup(True)
         else:
             self.remove_css_class("dim-label")
-            self.set_title(self._text)
-            self.set_use_markup(False)
+            self.set_title(f"{self._text}{recur_sym}")
+            self.set_use_markup(True)
 
     def _update_days_remaining(self) -> None:
         """Update the days remaining label based on end date and completion status."""
@@ -255,9 +300,10 @@ class GoalRow(Adw.ExpanderRow):
         "goal-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "goal-deleted": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "edit-requested": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        "reminder-set": (GObject.SignalFlags.RUN_FIRST, None, (str, str)), # task_text, date
     }
 
-    def __init__(self, title: str, description: str = "", completed: bool = False, tasks: list = None, created_at: str = None, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, color: str = None, end_time: str = ""):
+    def __init__(self, title: str, description: str = "", completed: bool = False, tasks: list = None, created_at: str = None, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, color: str = None, end_time: str = "", recurrence: str = "none", recurrence_days: str = ""):
         super().__init__()
 
         self._id = id or uuid.uuid4().hex
@@ -273,6 +319,8 @@ class GoalRow(Adw.ExpanderRow):
         self._end_time = end_time or ""
         self._completion_date = ""  # Initialized later if provided
         self._color = color or "rgb(53,132,228)" # Default blue
+        self._recurrence = recurrence or "none"
+        self._recurrence_days = recurrence_days or ""
 
         self.set_title(title)
         if description:
@@ -439,6 +487,14 @@ class GoalRow(Adw.ExpanderRow):
         self._depth = value
         self.set_margin_start(value * 24)
 
+    @property
+    def recurrence(self) -> str:
+        return self._recurrence
+
+    @property
+    def recurrence_days(self) -> str:
+        return self._recurrence_days
+
     def get_tasks(self) -> list:
         """Get all sub-tasks as list of dicts."""
         tasks = []
@@ -450,7 +506,10 @@ class GoalRow(Adw.ExpanderRow):
                 "completed": row.completed,
                 "end_date": row.end_date,
                 "end_time": row.end_time,
-                "completion_date": getattr(row, "_completion_date", "")
+                "completion_date": getattr(row, "_completion_date", ""),
+                "created_at": row.created_at,
+                "recurrence": row.recurrence,
+                "recurrence_days": row.recurrence_days
             })
         return tasks
 
@@ -504,12 +563,13 @@ class GoalRow(Adw.ExpanderRow):
         cr.arc(width / 2, height / 2, radius, 0, 2 * 3.14159)
         cr.fill()
 
-    def _add_subtask(self, text: str, completed: bool, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, end_time: str = "") -> SubTaskRow:
+    def _add_subtask(self, text: str, completed: bool, end_date: str = "", id: str = None, parent_id: str = "", depth: int = 0, end_time: str = "", recurrence: str = "none", recurrence_days: str = "", created_at: str = None) -> SubTaskRow:
         """Add a sub-task row."""
-        row = SubTaskRow(text, completed, end_date, id, parent_id, depth, end_time)
+        row = SubTaskRow(text, completed, end_date, id, parent_id, depth, end_time, recurrence, recurrence_days, created_at)
         row.connect("task-toggled", self._on_subtask_toggled)
         row.connect("task-changed", self._on_subtask_changed)
         row.connect("task-deleted", self._on_subtask_deleted, row)
+        row.connect("reminder-set", self._on_reminder_set)
         self._subtask_rows.append(row)
         self.add_row(row)
         return row
@@ -522,7 +582,10 @@ class GoalRow(Adw.ExpanderRow):
             task.get("id"),
             task.get("parent_id", ""),
             task.get("depth", 0),
-            task.get("end_time", "")
+            task.get("end_time", ""),
+            task.get("recurrence", "none"),
+            task.get("recurrence_days", ""),
+            task.get("created_at")
         )
         if row and task.get("completion_date"):
             row._completion_date = task["completion_date"]
@@ -593,10 +656,77 @@ class GoalRow(Adw.ExpanderRow):
         # Update our internal list to match the new order for next time
         self._subtask_rows = ordered_rows
 
+    def _on_reminder_set(self, row: SubTaskRow, date_str: str) -> None:
+        """Bubble up reminder-set signal."""
+        self.emit("reminder-set", row.task_text, date_str)
+
     def _on_subtask_toggled(self, row: SubTaskRow, completed: bool) -> None:
         """Handle sub-task toggle."""
+        if completed and row.recurrence != "none":
+            # Generate next occurrence
+            self._handle_recurrence(row)
+            
         self._update_progress()
         self.emit("goal-changed")
+
+    def _handle_recurrence(self, row: SubTaskRow) -> None:
+        """Create the next instance of a recurring task."""
+        current_date_str = row.end_date or date.today().isoformat()
+        next_date = self.calculate_next_recurrence(current_date_str, row.recurrence, row.recurrence_days)
+        
+        if next_date:
+            self._add_subtask(
+                row.task_text,
+                False,
+                next_date.isoformat(),
+                None,
+                row.parent_id,
+                row.depth,
+                row.end_time,
+                row.recurrence,
+                row.recurrence_days
+            )
+            # Reorder to place new task correctly
+            self.reorder_tasks()
+
+    def calculate_next_recurrence(self, current_date_str: str, recurrence: str, recurrence_days: str) -> date | None:
+        """Calculate the next date based on recurrence rules."""
+        try:
+            current_date = datetime.strptime(current_date_str, "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            current_date = date.today()
+
+        if recurrence == "daily":
+            return current_date + timedelta(days=1)
+        
+        elif recurrence == "monthly":
+            # Rough monthly jump
+            month = current_date.month % 12 + 1
+            year = current_date.year + (current_date.month // 12)
+            try:
+                return current_date.replace(year=year, month=month)
+            except ValueError:
+                # Handle end of month issues (e.g. Jan 31 -> Feb 28)
+                return (current_date.replace(day=1) + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+                
+        elif recurrence == "weekly":
+            if not recurrence_days:
+                return current_date + timedelta(days=7)
+            
+            allowed_days = [int(d) for d in recurrence_days.split(",") if d.strip()]
+            if not allowed_days:
+                return current_date + timedelta(days=7)
+            
+            # Find next allowed day
+            # Gtk/Python weekday is 0-6 (Mon-Sun)
+            current_weekday = current_date.weekday()
+            
+            for i in range(1, 8):
+                next_candidate = current_date + timedelta(days=i)
+                if next_candidate.weekday() in allowed_days:
+                    return next_candidate
+                    
+        return None
 
     def _on_subtask_changed(self, row: SubTaskRow, text: str) -> None:
         """Handle sub-task change."""
@@ -633,7 +763,29 @@ class GoalRow(Adw.ExpanderRow):
         self.emit("edit-requested")
 
     def _on_delete_clicked(self, button: Gtk.Button) -> None:
-        self.emit("goal-deleted")
+        """Show confirmation dialog before deletion."""
+        dialog = Adw.MessageDialog(
+            heading="Delete Goal?",
+            body="Are you sure you want to delete this goal? All sub-tasks will also be deleted. This action cannot be undone."
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("delete", "Delete")
+        
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        
+        dialog.connect("response", self._on_delete_response)
+        
+        # Present dialog
+        root = self.get_root()
+        if root:
+            dialog.set_transient_for(root); dialog.present()
+
+    def _on_delete_response(self, dialog: Adw.MessageDialog, response: str) -> None:
+        """Handle delete confirmation response."""
+        if response == "delete":
+            self.emit("goal-deleted")
 
     def _update_style(self) -> None:
         if self._completed:

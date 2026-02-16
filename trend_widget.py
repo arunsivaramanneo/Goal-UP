@@ -248,6 +248,6 @@ class TrendGraphWidget(Gtk.DrawingArea):
         cr.fill()
         
         cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.8)
-        (tx, ty, tw, th, dx, dy) = cr.text_extents("Total")
+        (tx, ty, tw, th, dx, dy) = cr.text_extents("Pending")
         cr.move_to(padding + 136, legend_y + 8 - ty)
-        cr.show_text("Total")
+        cr.show_text("Pending")
