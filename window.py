@@ -10,8 +10,8 @@ from gi.repository import Adw, Gtk, Gdk, Gio, GLib
 
 from goal_row import GoalRow
 from edit_dialog import EditGoalDialog
-from storage import load_tasks, save_tasks, export_to_ics, export_backup, import_backup
-from summary_widget import GoalPieChartsWidget, GoalTrendWidget, NotificationWidget, TimerWidget
+from storage import load_tasks, save_tasks, export_to_ics, export_backup, import_backup, load_settings, save_settings
+from summary_widget import GoalPieChartsWidget, GoalTrendWidget, NotificationWidget, TimerWidget, CalendarWidget
 from timeline_widget import TimelineWidget
 from notification_manager import NotificationManager
 from datetime import datetime, date
@@ -24,6 +24,10 @@ class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application):
         super().__init__(application=app)
 
+        # Load settings
+        self.settings = load_settings()
+        self.current_theme = self.settings.get("theme", "light")
+        
         self.set_title("Goal UP")
         self.set_default_size(1200, 850)
         
@@ -77,6 +81,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.data_button.set_tooltip_text("Data Management")
         self.data_button.set_menu_model(data_menu)
         header.pack_end(self.data_button)
+
+        # Theme Toggle
+        self.theme_button = Gtk.Button()
+        self._update_theme_icon()
+        self.theme_button.set_tooltip_text("Toggle Dark/Light Theme")
+        self.theme_button.connect("clicked", self._on_theme_toggled)
+        header.pack_end(self.theme_button)
 
         # Actions for the menu
         export_ics_action = Gio.SimpleAction.new("export-ics", None)
@@ -195,6 +206,10 @@ class MainWindow(Adw.ApplicationWindow):
         right_sidebar_box.set_margin_end(12)
         right_scrolled.set_child(right_sidebar_box)
 
+        # Calendar Widget
+        self.calendar_widget = CalendarWidget()
+        right_sidebar_box.append(self.calendar_widget)
+
         # Notification Widget as right sidebar
         self.notification_widget = NotificationWidget()
         right_sidebar_box.append(self.notification_widget)
@@ -210,6 +225,52 @@ class MainWindow(Adw.ApplicationWindow):
         # Initialize notifications
         self.notification_manager = NotificationManager(app)
         self._check_and_notify()
+
+        # Apply initial theme
+        self._apply_theme(self.current_theme)
+
+    def _apply_theme(self, theme: str) -> None:
+        """Apply the specified theme."""
+        style_manager = Adw.StyleManager.get_default()
+        
+        # We'll use our own CSS files as requested
+        # First, remove existing providers if any (not strictly necessary for simple app)
+        
+        css_file = "gtk_dark.css" if theme == "dark" else "gtk_light.css"
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        css_path = os.path.join(current_dir, css_file)
+        
+        if os.path.exists(css_path):
+            provider = Gtk.CssProvider()
+            provider.load_from_path(css_path)
+            Gtk.StyleContext.add_provider_for_display(
+                Gdk.Display.get_default(),
+                provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            )
+            
+            # Also set the libadwaita color scheme to match
+            if theme == "dark":
+                style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+            else:
+                style_manager.set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
+        
+        self.current_theme = theme
+        self.settings["theme"] = theme
+        save_settings(self.settings)
+        self._update_theme_icon()
+
+    def _update_theme_icon(self) -> None:
+        """Update the theme button icon based on current theme."""
+        if self.current_theme == "dark":
+            self.theme_button.set_icon_name("display-brightness-symbolic")
+        else:
+            self.theme_button.set_icon_name("weather-clear-night-symbolic")
+
+    def _on_theme_toggled(self, button: Gtk.Button) -> None:
+        """Handle theme toggle button click."""
+        new_theme = "light" if self.current_theme == "dark" else "dark"
+        self._apply_theme(new_theme)
 
     def _check_and_notify(self) -> None:
         """Check for events due today and notify."""
@@ -587,6 +648,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.timeline_widget.update_data(goals)
         self.timer_widget.update_data(goals)
         self.notification_widget.update_data(goals)
+        self.calendar_widget.update_data(goals)
 
     def _update_empty_state(self) -> None:
         """Show or hide the empty state message."""

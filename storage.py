@@ -12,6 +12,42 @@ def get_data_path() -> Path:
     return data_dir / "tasks.json"
 
 
+def get_settings_path() -> Path:
+    """Get the path to the settings JSON file."""
+    data_dir = Path.home() / ".local" / "share" / "goal-up"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / "settings.json"
+
+
+def load_settings() -> dict:
+    """Load settings from the JSON file."""
+    path = get_settings_path()
+    default_settings = {"theme": "light"}
+    
+    if not path.exists():
+        return default_settings
+    
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            settings = json.load(f)
+            # Ensure default theme if missing
+            if "theme" not in settings:
+                settings["theme"] = "light"
+            return settings
+    except (json.JSONDecodeError, IOError):
+        return default_settings
+
+
+def save_settings(settings: dict) -> None:
+    """Save settings to the JSON file."""
+    path = get_settings_path()
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2, ensure_ascii=False)
+    except IOError:
+        pass
+
+
 def load_tasks() -> list[dict]:
     """Load tasks from the JSON file."""
     path = get_data_path()

@@ -3,6 +3,7 @@
 import math
 import gi
 import cairo
+import calendar
 from datetime import datetime, date, timedelta
 from collections import defaultdict
 
@@ -688,3 +689,225 @@ class TimerWidget(Adw.Bin):
         
         return True
 
+
+class CalendarWidget(Adw.Bin):
+    """Monthly calendar widget showing tasks and goals as dots."""
+
+    def __init__(self):
+        super().__init__()
+        self._goals = []
+        self._view_date = date.today().replace(day=1)
+        
+        self.set_margin_top(12)
+        self.set_margin_bottom(12)
+        
+        self._main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.set_child(self._main_box)
+        
+        # Header: Month Year + Navigation
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._main_box.append(header_box)
+        
+        self._month_label = Gtk.Label()
+        self._month_label.add_css_class("title-4")
+        self._month_label.set_hexpand(True)
+        self._month_label.set_halign(Gtk.Align.START)
+        header_box.append(self._month_label)
+        
+        prev_btn = Gtk.Button(icon_name="go-previous-symbolic")
+        prev_btn.add_css_class("flat")
+        prev_btn.connect("clicked", self._on_prev_clicked)
+        header_box.append(prev_btn)
+        
+        next_btn = Gtk.Button(icon_name="go-next-symbolic")
+        next_btn.add_css_class("flat")
+        next_btn.connect("clicked", self._on_next_clicked)
+        header_box.append(next_btn)
+        
+        # Day headers (Mon-Sun)
+        self._grid = Gtk.Grid()
+        self._grid.set_column_homogeneous(True)
+        self._grid.set_row_spacing(8)
+        self._grid.set_column_spacing(4)
+        self._main_box.append(self._grid)
+        
+        self._refresh()
+
+    def update_data(self, goals):
+        self._goals = goals
+        self._refresh()
+
+    def _on_prev_clicked(self, btn):
+        year = self._view_date.year
+        month = self._view_date.month - 1
+        if month == 0:
+            month = 12
+            year -= 1
+        self._view_date = date(year, month, 1)
+        self._refresh()
+
+    def _on_next_clicked(self, btn):
+        year = self._view_date.year
+        month = self._view_date.month + 1
+        if month == 13:
+            month = 1
+            year += 1
+        self._view_date = date(year, month, 1)
+        self._refresh()
+
+    def _refresh(self):
+        # Update month label
+        self._month_label.set_text(self._view_date.strftime("%B %Y"))
+        
+        # Clear previous grid content
+        while True:
+            child = self._grid.get_first_child()
+            if not child: break
+            self._grid.remove(child)
+
+        days_of_week = ["M", "T", "W", "T", "F", "S", "S"]
+        for i, d in enumerate(days_of_week):
+            lbl = Gtk.Label(label=d)
+            lbl.add_css_class("dim-label")
+            lbl.add_css_class("caption")
+            lbl.set_margin_bottom(4)
+            self._grid.attach(lbl, i, 0, 1, 1)
+
+        cal = calendar.monthcalendar(self._view_date.year, self._view_date.month)
+        today = date.today()
+        
+        for row_idx, week in enumerate(cal):
+            for col_idx, day in enumerate(week):
+                if day == 0:
+                    continue
+                
+                day_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+                day_box.set_valign(Gtk.Align.CENTER)
+                day_box.set_halign(Gtk.Align.CENTER)
+                day_box.set_spacing(2)
+                day_box.set_size_request(30, 40)
+                
+                day_label = Gtk.Label(label=str(day))
+                day_label.add_css_class("caption")
+                
+                curr_date = date(self._view_date.year, self._view_date.month, day)
+                if curr_date == today:
+                    day_label.add_css_class("accent")
+                    day_label.set_markup(f"<b>{day}</b>")
+                
+                day_box.append(day_label)
+                
+                # Dots for tasks/goals
+                dots_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+                dots_box.set_halign(Gtk.Align.CENTER)
+                day_box.append(dots_box)
+                
+                colors = self._get_colors_for_date(curr_date)
+                for color in colors[:3]: # Limit to 3 dots to avoid overcrowding
+                    dot = Gtk.Box()
+                    dot.set_size_request(6, 6)
+                    
+                    # Ensure color is in a format CSS likes
+                    clean_color = color if color.startswith('#') or color.startswith('rgb') else f"#{color}"
+                    
+                    provider = Gtk.CssProvider()
+                    # We use a unique class or just target the widget
+                    css = f"box {{ background-color: {clean_color}; border-radius: 3px; }}"
+                    provider.load_from_data(css.encode())
+                    dot.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+                    dots_box.append(dot)
+
+                details = self._get_details_for_date(curr_date)
+                if details:
+                    day_box.set_tooltip_text("\n".join(details))
+                    day_box.set_has_tooltip(True)
+                
+                self._grid.attach(day_box, col_idx, row_idx + 1, 1, 1)
+
+    def _get_colors_for_date(self, target_date):
+        target_str = target_date.strftime("%Y-%m-%d")
+        colors = []
+        for g in self._goals:
+            # Check goal end date
+            if g.get("end_date") == target_str:
+                colors.append(g.get("color") or "#808080")
+            
+            # Check tasks
+            for t in g.get("tasks", []):
+                # Absolute date
+                if t.get("end_date") == target_str:
+                    colors.append(g.get("color") or "#808080")
+                # Recurring tasks logic
+                elif t.get("recurrence", "none") != "none":
+                    if self._is_on_date(target_date, t):
+                        colors.append(g.get("color") or "#808080")
+                            
+        # Return unique colors
+        seen = set()
+        unique_colors = []
+        for c in colors:
+            if c and c not in seen:
+                unique_colors.append(c)
+                seen.add(c)
+        return unique_colors
+
+    def _get_details_for_date(self, target_date):
+        target_str = target_date.strftime("%Y-%m-%d")
+        details = []
+        for g in self._goals:
+            # Check goal end date
+            if g.get("end_date") == target_str:
+                status = "✓ " if g.get("completed") else "○ "
+                details.append(f"{status}Goal: {g['title']}")
+            
+            # Check tasks
+            for t in g.get("tasks", []):
+                is_on_date = False
+                if t.get("end_date") == target_str:
+                    is_on_date = True
+                elif t.get("recurrence", "none") != "none":
+                    if self._is_on_date(target_date, t):
+                        is_on_date = True
+                
+                if is_on_date:
+                    status = "✓ " if t.get("completed") else "○ "
+                    is_recurring = " 🔄" if t.get("recurrence", "none") != "none" else ""
+                    details.append(f"{status}Task: {t['text']} ({g['title']}){is_recurring}")
+        return details
+
+    def _is_on_date(self, target_date, task):
+        recurrence = task.get("recurrence")
+        created_str = task.get("created_at")
+        if not created_str: return False
+        
+        try:
+            if "T" in created_str:
+                created_date = datetime.strptime(created_str.split("T")[0], "%Y-%m-%d").date()
+            else:
+                created_date = datetime.strptime(created_str, "%Y-%m-%d").date()
+        except:
+            return False
+            
+        if target_date < created_date:
+            return False
+            
+        task_end = None
+        if task.get("end_date"):
+            try:
+                task_end = datetime.strptime(task["end_date"], "%Y-%m-%d").date()
+            except: pass
+            
+        if task_end and target_date > task_end:
+            return False
+            
+        if recurrence == "daily":
+            return True
+        elif recurrence == "monthly":
+            return target_date.day == created_date.day
+        elif recurrence == "weekly":
+            days_str = task.get("recurrence_days", "")
+            if not days_str: return False
+            allowed_days = [int(d) for d in days_str.split(",") if d.strip()]
+            return target_date.weekday() in allowed_days
+            
+        return False
