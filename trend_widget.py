@@ -135,8 +135,8 @@ class TrendGraphWidget(Gtk.DrawingArea):
         y_scale = graph_height / max_value
         
         # Draw grid lines
-        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.1)
-        cr.set_line_width(0.5)
+        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.2)
+        cr.set_line_width(1.0)
         
         # Y-axis grid lines
         for i in range(int(max_value) + 1):
@@ -146,8 +146,8 @@ class TrendGraphWidget(Gtk.DrawingArea):
             cr.stroke()
         
         # Draw axes
-        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.3)
-        cr.set_line_width(1.5)
+        cr.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, 0.6)
+        cr.set_line_width(2.5)
         cr.move_to(padding, padding + graph_height)
         cr.line_to(padding + graph_width, padding + graph_height)
         cr.stroke()
@@ -178,8 +178,8 @@ class TrendGraphWidget(Gtk.DrawingArea):
             completed_points.append((x, y_completed))
             total_points.append((x, y_total))
         
-        # Draw total line (orange/light color)
-        cr.set_source_rgba(0.9, 0.4, 0.2, 0.7)  # Orange
+        # Draw total line (Grey color)
+        cr.set_source_rgba(0.5, 0.5, 0.5, 0.7)  # Grey
         cr.set_line_width(2.5)
         for i, (x, y) in enumerate(total_points):
             if i == 0:
@@ -207,7 +207,7 @@ class TrendGraphWidget(Gtk.DrawingArea):
             cr.fill()
         
         # Draw points on total line
-        cr.set_source_rgba(0.9, 0.4, 0.2, 0.8)
+        cr.set_source_rgba(0.5, 0.5, 0.5, 0.8)
         for x, y in total_points:
             cr.new_path()
             cr.arc(x, y, 3, 0, 2 * math.pi)
@@ -242,8 +242,8 @@ class TrendGraphWidget(Gtk.DrawingArea):
         cr.move_to(padding + 16, legend_y + 8 - ty)
         cr.show_text("Completed")
         
-        # Orange square for total
-        cr.set_source_rgba(0.9, 0.4, 0.2, 0.8)
+        # Grey square for total
+        cr.set_source_rgba(0.5, 0.5, 0.5, 0.8)
         cr.rectangle(padding + 120, legend_y, 10, 10)
         cr.fill()
         

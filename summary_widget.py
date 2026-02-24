@@ -139,8 +139,8 @@ class GoalPieChartsWidget(Gtk.DrawingArea):
                     "start": current_angle, "end": end_angle, "goal": goal, "task_count": task_count,
                     "completed_count": sum(1 for t in goal.get("tasks", []) if t.get("completed")), "percent": percent
                 })
-                cr.set_line_width(0.8)
-                cr.set_source_rgba(0, 0, 0, 0.15) if self._luminance(base_color) > 0.6 else cr.set_source_rgba(1, 1, 1, 0.12)
+                cr.set_line_width(1.5)
+                cr.set_source_rgba(0, 0, 0, 0.2) if self._luminance(base_color) > 0.6 else cr.set_source_rgba(1, 1, 1, 0.2)
                 cr.stroke()
                 cc = sum(1 for t in goal.get("tasks", []) if t.get("completed"))
                 if cc > 0:
@@ -150,7 +150,7 @@ class GoalPieChartsWidget(Gtk.DrawingArea):
                     cr.new_path(); cr.arc(center_x, center_y, radius * 0.9, current_angle, current_angle + angle_span * gp)
                     cr.arc(center_x, center_y, radius * 0.55, current_angle + angle_span * gp, current_angle); cr.close_path()
                     cr.set_source_rgba(or_, og, ob, 0.95); cr.fill_preserve()
-                    cr.set_line_width(1.0); cr.set_source_rgba(sr, sg, sb, sa); cr.stroke()
+                    cr.set_line_width(2.0); cr.set_source_rgba(sr, sg, sb, sa); cr.stroke()
                 current_angle = end_angle
 
         p_goals = int((self._completed_goals / self._total_goals) * 100) if self._total_goals > 0 else 0
@@ -174,14 +174,14 @@ class GoalPieChartsWidget(Gtk.DrawingArea):
         if pc < 1.0:
             rs, re = sa + pc * 2 * math.pi, sa + 2 * math.pi
             cr.new_path(); cr.arc(center_x, center_y, radius, rs, re); cr.arc(center_x, center_y, inner_r, re, rs); cr.close_path()
-            cr.set_source_rgb(*remaining_color); cr.fill_preserve(); cr.set_line_width(0.8)
-            cr.set_source_rgba(0,0,0,0.12) if self._luminance(remaining_color) > 0.6 else cr.set_source_rgba(1,1,1,0.12); cr.stroke()
+            cr.set_source_rgb(*remaining_color); cr.fill_preserve(); cr.set_line_width(1.5)
+            cr.set_source_rgba(0,0,0,0.2) if self._luminance(remaining_color) > 0.6 else cr.set_source_rgba(1,1,1,0.25); cr.stroke()
             self._last_task_slices.append({"center_x": center_x, "center_y": center_y, "outer_r": radius, "inner_r": inner_r, "start": rs, "end": re, "kind": "remaining", "value": total - completed, "total": total})
         if pc > 0:
             cs, ce = sa, sa + pc * 2 * math.pi
             cr.new_path(); cr.arc(center_x, center_y, radius, cs, ce); cr.arc(center_x, center_y, inner_r, ce, cs); cr.close_path()
-            cr.set_source_rgb(*completed_color); cr.fill_preserve(); cr.set_line_width(0.8)
-            cr.set_source_rgba(0,0,0,0.12) if self._luminance(completed_color) > 0.6 else cr.set_source_rgba(1,1,1,0.12); cr.stroke()
+            cr.set_source_rgb(*completed_color); cr.fill_preserve(); cr.set_line_width(1.5)
+            cr.set_source_rgba(0,0,0,0.2) if self._luminance(completed_color) > 0.6 else cr.set_source_rgba(1,1,1,0.25); cr.stroke()
             self._last_task_slices.append({"center_x": center_x, "center_y": center_y, "outer_r": radius, "inner_r": inner_r, "start": cs, "end": ce, "kind": "completed", "value": completed, "total": total})
         fg = self._style_context.get_color()
         fgl = 0.2126 * fg.red + 0.7152 * fg.green + 0.0722 * fg.blue
@@ -230,7 +230,7 @@ class GoalTrendWidget(Gtk.DrawingArea):
         cr.move_to(x + width/2 - tw/2 - tx, y - 5); cr.show_text(txt)
         
         ax, ay, cw, ch = x + 30, y + 20, width - 40, height - 60
-        cr.set_line_width(1); cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.5)
+        cr.set_line_width(2.5); cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.7)
         cr.move_to(ax, ay); cr.line_to(ax, ay + ch); cr.line_to(ax + cw, ay + ch); cr.stroke()
         
         if months:
@@ -248,7 +248,8 @@ class GoalTrendWidget(Gtk.DrawingArea):
                 # Draw completed bar (green) overlapping
                 cr.set_source_rgb(0.15, 0.68, 0.37)
                 cr.rectangle(bx, ay + ch - ch_, bw, ch_)
-                cr.fill()
+                cr.fill_preserve()
+                cr.set_line_width(1.0); cr.set_source_rgba(0,0,0,0.2); cr.stroke()
                 
                 # Draw month labels (rotated)
                 cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.9); cr.set_font_size(10)
@@ -828,19 +829,35 @@ class CalendarWidget(Adw.Bin):
         target_str = target_date.strftime("%Y-%m-%d")
         colors = []
         for g in self._goals:
-            # Check goal end date
-            if g.get("end_date") == target_str:
-                colors.append(g.get("color") or "#808080")
+            # Check goal date
+            if g.get("completed"):
+                date_to_match = g.get("completion_date") or g.get("end_date")
+                if date_to_match:
+                    date_to_match = date_to_match.split("T")[0]
+                if date_to_match == target_str:
+                    colors.append(g.get("color") or "#808080")
+            else:
+                if g.get("end_date") == target_str:
+                    colors.append(g.get("color") or "#808080")
             
             # Check tasks
             for t in g.get("tasks", []):
-                # Absolute date
-                if t.get("end_date") == target_str:
+                is_on_date = False
+                if t.get("completed"):
+                    date_to_match = t.get("completion_date") or t.get("end_date")
+                    if date_to_match:
+                        date_to_match = date_to_match.split("T")[0]
+                    if date_to_match == target_str:
+                        is_on_date = True
+                else:
+                    if t.get("end_date") == target_str:
+                        is_on_date = True
+                    elif t.get("recurrence", "none") != "none":
+                        if self._is_on_date(target_date, t):
+                            is_on_date = True
+
+                if is_on_date:
                     colors.append(g.get("color") or "#808080")
-                # Recurring tasks logic
-                elif t.get("recurrence", "none") != "none":
-                    if self._is_on_date(target_date, t):
-                        colors.append(g.get("color") or "#808080")
                             
         # Return unique colors
         seen = set()
@@ -855,19 +872,37 @@ class CalendarWidget(Adw.Bin):
         target_str = target_date.strftime("%Y-%m-%d")
         details = []
         for g in self._goals:
-            # Check goal end date
-            if g.get("end_date") == target_str:
+            # Check goal date
+            is_goal_on_date = False
+            if g.get("completed"):
+                date_to_match = g.get("completion_date") or g.get("end_date")
+                if date_to_match:
+                    date_to_match = date_to_match.split("T")[0]
+                if date_to_match == target_str:
+                    is_goal_on_date = True
+            else:
+                if g.get("end_date") == target_str:
+                    is_goal_on_date = True
+            
+            if is_goal_on_date:
                 status = "✓ " if g.get("completed") else "○ "
                 details.append(f"{status}Goal: {g['title']}")
             
             # Check tasks
             for t in g.get("tasks", []):
                 is_on_date = False
-                if t.get("end_date") == target_str:
-                    is_on_date = True
-                elif t.get("recurrence", "none") != "none":
-                    if self._is_on_date(target_date, t):
+                if t.get("completed"):
+                    date_to_match = t.get("completion_date") or t.get("end_date")
+                    if date_to_match:
+                        date_to_match = date_to_match.split("T")[0]
+                    if date_to_match == target_str:
                         is_on_date = True
+                else:
+                    if t.get("end_date") == target_str:
+                        is_on_date = True
+                    elif t.get("recurrence", "none") != "none":
+                        if self._is_on_date(target_date, t):
+                            is_on_date = True
                 
                 if is_on_date:
                     status = "✓ " if t.get("completed") else "○ "
