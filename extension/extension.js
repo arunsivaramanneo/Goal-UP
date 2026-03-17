@@ -34,6 +34,8 @@ export default class GoalUPExtension extends Extension {
 
         this._indicator.add_child(box);
 
+        this._clickHandlerId = this._indicator.connect('button-press-event', this._onIndicatorClicked.bind(this));
+
         Main.panel.addToStatusArea(this.uuid, this._indicator);
 
         this._updateLoop();
@@ -41,6 +43,10 @@ export default class GoalUPExtension extends Extension {
     }
 
     disable() {
+        if (this._clickHandlerId) {
+            this._indicator.disconnect(this._clickHandlerId);
+            this._clickHandlerId = null;
+        }
         if (this._timeout) {
             GLib.Source.remove(this._timeout);
             this._timeout = null;
@@ -147,4 +153,37 @@ export default class GoalUPExtension extends Extension {
 
         this._label.set_text(`${this._nextDeadline.title}: ${timeStr}`);
     }
+
+    _onIndicatorClicked(_actor, event) {
+        if (event.get_button() !== Clutter.BUTTON_PRIMARY) {
+            return Clutter.EVENT_PROPAGATE;
+        }
+
+        this._openGoalUpApp();
+        return Clutter.EVENT_STOP;
+    }
+
+    _openGoalUpApp() {
+        let app;
+
+        try {
+            app = Gio.DesktopAppInfo.new('goal-up.desktop');
+            if (app) {
+                app.launch([], null);
+                return;
+            }
+        } catch (e) {
+            log(`Goal-UP: desktop entry launch failed: ${e}`);
+        }
+
+        try {
+            app = Gio.AppInfo.create_from_commandline('goal-up', 'Goal-UP', Gio.AppInfoCreateFlags.NONE);
+            if (app) {
+                app.launch([], null);
+            }
+        } catch (e) {
+            log(`Goal-UP: fallback command launch failed: ${e}`);
+        }
+    }
 }
+

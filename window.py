@@ -37,14 +37,20 @@ class MainWindow(Adw.ApplicationWindow):
         # This allows finding 'icon.png' if it's in the same directory as window.py
         current_dir = os.path.dirname(os.path.abspath(__file__))
         icon_theme.add_search_path(current_dir)
-        
-        # Also check standard XDG paths (usually handled by default, but ensuring reliability)
-        # If installed, the icon might be in /share/icons, which is covered by standard paths.
-        
-        self.set_icon_name("goal-up") # Use 'goal-up' to match desktop file icon name, fallback handled later
-        if not icon_theme.has_icon("goal-up"):
-             # Fallback for local development if installed icon not found
-             self.set_icon_name("icon") # The local file is icon.png
+
+        icon_file = os.path.join(current_dir, "icon.png")
+        if os.path.exists(icon_file):
+            try:
+                self.set_icon_from_file(icon_file)
+            except Exception:
+                # Fallback if file icon is unavailable
+                self.set_icon_name("goal-up")
+        else:
+            self.set_icon_name("goal-up")
+
+        if not icon_theme.has_icon("goal-up") and not os.path.exists(icon_file):
+            # Final fallback to generic icon if bundle icon is unavailable
+            self.set_icon_name("application-x-executable")
 
         # Main layout
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

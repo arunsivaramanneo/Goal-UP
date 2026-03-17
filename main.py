@@ -21,6 +21,7 @@ class GoalUpApplication(Adw.Application):
             application_id="io.github.arunsivaramanneo.GoalUp",
             flags=Gio.ApplicationFlags.DEFAULT_FLAGS,
         )
+        # Use window icon setup in MainWindow; avoid unsupported Gio call on Adw.Application
 
     def do_activate(self) -> None:
         """Handle application activation."""
