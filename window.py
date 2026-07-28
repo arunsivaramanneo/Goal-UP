@@ -14,6 +14,7 @@ from storage import load_tasks, save_tasks, export_to_ics, export_backup, import
 from summary_widget import GoalPieChartsWidget, GoalTrendWidget, NotificationWidget, TimerWidget, CalendarWidget
 from timeline_widget import TimelineWidget
 from notification_manager import NotificationManager
+from desktop_widget import DesktopWidget
 from datetime import datetime, date
 import random
 
@@ -94,6 +95,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.theme_button.set_tooltip_text("Toggle Dark/Light Theme")
         self.theme_button.connect("clicked", self._on_theme_toggled)
         header.pack_end(self.theme_button)
+
+        # Desktop Widget Toggle
+        self.widget_toggle_button = Gtk.ToggleButton()
+        self.widget_toggle_button.set_icon_name("view-grid-symbolic")
+        self.widget_toggle_button.set_tooltip_text("Toggle Desktop Progress Widget")
+        self.widget_toggle_button.connect("toggled", self._on_widget_toggled)
+        header.pack_end(self.widget_toggle_button)
 
         # Actions for the menu
         export_ics_action = Gio.SimpleAction.new("export-ics", None)
@@ -235,6 +243,13 @@ class MainWindow(Adw.ApplicationWindow):
         # Apply initial theme
         self._apply_theme(self.current_theme)
 
+        # Desktop widget (created after theme is applied)
+        self.desktop_widget = DesktopWidget(app, self.settings, save_settings)
+        # Restore toggle state
+        if self.settings.get("widget_visible", False):
+            self.widget_toggle_button.set_active(True)
+            self.desktop_widget.present()
+
     def _apply_theme(self, theme: str) -> None:
         """Apply the specified theme."""
         style_manager = Adw.StyleManager.get_default()
@@ -277,6 +292,19 @@ class MainWindow(Adw.ApplicationWindow):
         """Handle theme toggle button click."""
         new_theme = "light" if self.current_theme == "dark" else "dark"
         self._apply_theme(new_theme)
+
+    def _on_widget_toggled(self, button: Gtk.ToggleButton) -> None:
+        """Show or hide the floating desktop widget."""
+        visible = button.get_active()
+        if visible:
+            self.desktop_widget.present()
+            # Feed current data immediately
+            goals = self._get_goals_data()
+            self.desktop_widget.update_data(goals)
+        else:
+            self.desktop_widget.hide()
+        self.settings["widget_visible"] = visible
+        save_settings(self.settings)
 
     def _check_and_notify(self) -> None:
         """Check for events due today and notify."""
@@ -655,6 +683,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.timer_widget.update_data(goals)
         self.notification_widget.update_data(goals)
         self.calendar_widget.update_data(goals)
+        # Update desktop widget if it exists
+        if hasattr(self, "desktop_widget"):
+            self.desktop_widget.update_data(goals)
 
     def _update_empty_state(self) -> None:
         """Show or hide the empty state message."""

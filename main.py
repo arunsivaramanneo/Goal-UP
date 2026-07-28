@@ -24,11 +24,20 @@ class GoalUpApplication(Adw.Application):
         # Use window icon setup in MainWindow; avoid unsupported Gio call on Adw.Application
 
     def do_activate(self) -> None:
-        """Handle application activation."""
-        window = self.get_active_window()
-        if not window:
-            window = MainWindow(self)
-        window.present()
+        """Handle application activation — always raise the MainWindow."""
+        # Search for an existing MainWindow among all application windows.
+        # We must NOT use get_active_window() here because the floating
+        # DesktopWidget is also an app window and may be the "active" one,
+        # which would cause the launcher click to only raise the widget
+        # instead of opening the full application.
+        main_window = None
+        for win in self.get_windows():
+            if isinstance(win, MainWindow):
+                main_window = win
+                break
+        if main_window is None:
+            main_window = MainWindow(self)
+        main_window.present()
 
 
 def main() -> int:

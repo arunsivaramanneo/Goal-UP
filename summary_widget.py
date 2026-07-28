@@ -196,142 +196,357 @@ class GoalPieChartsWidget(Gtk.DrawingArea):
         cr.move_to(center_x - lw / 2 - lx, center_y + radius + 30); cr.show_text(lbl)
 
 
-class GoalTrendWidget(Gtk.DrawingArea):
-    """Widget that draws the monthly completion trend bar chart."""
+class GoalTrendWidget(Gtk.Box):
+    """
+    Motivational heatmap widget — GitHub-style daily contribution graph
+    showing task/goal completions over the past year, plus streak stats.
+    """
+
+    # Heatmap colour levels (light → vibrant) — works on both themes
+    _HEAT_COLORS = [
+        (0.15, 0.15, 0.15, 0.18),   # level 0 — empty
+        (0.13, 0.55, 0.13, 0.60),   # level 1 — 1 completion
+        (0.10, 0.75, 0.20, 0.78),   # level 2 — 2-3
+        (0.05, 0.90, 0.30, 0.90),   # level 3 — 4-6
+        (0.00, 1.00, 0.42, 1.00),   # level 4 — 7+
+    ]
 
     def __init__(self):
-        super().__init__()
-        self.set_content_width(300)
-        self.set_content_height(400)
-        self.set_draw_func(self._draw_func)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._goals = []
-        self._style_context = self.get_style_context()
+        self._daily_counts = {}   # date → int completions
+        self._tooltip_text = ""
+
+        # ── Streak stats row ────────────────────────────────────────────────
+        stats_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        stats_box.set_margin_top(4)
+        stats_box.set_margin_bottom(6)
+        stats_box.set_margin_start(8)
+        stats_box.set_margin_end(8)
+        self.append(stats_box)
+
+        def _stat_card(icon, label_text, color_class):
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            card.set_hexpand(True)
+            card.add_css_class("card")
+            card.set_margin_start(4)
+            card.set_margin_end(4)
+            card.set_margin_top(2)
+            card.set_margin_bottom(2)
+
+            ico = Gtk.Label(label=icon)
+            ico.set_halign(Gtk.Align.CENTER)
+
+            val = Gtk.Label(label="0")
+            val.add_css_class("title-2")
+            val.add_css_class(color_class)
+            val.set_halign(Gtk.Align.CENTER)
+
+            lbl = Gtk.Label(label=label_text)
+            lbl.add_css_class("caption")
+            lbl.add_css_class("dim-label")
+            lbl.set_halign(Gtk.Align.CENTER)
+
+            card.append(ico)
+            card.append(val)
+            card.append(lbl)
+            return card, val
+
+        streak_card, self._streak_val   = _stat_card("🔥", "Current Streak", "accent")
+        best_card,   self._best_val     = _stat_card("🏆", "Best Streak",    "success")
+        total_card,  self._total_val    = _stat_card("✅", "Total Done",      "")
+
+        stats_box.append(streak_card)
+        stats_box.append(best_card)
+        stats_box.append(total_card)
+
+        # ── Section title ────────────────────────────────────────────────────
+        title_lbl = Gtk.Label(label="Completion Activity")
+        title_lbl.add_css_class("heading")
+        title_lbl.set_halign(Gtk.Align.START)
+        title_lbl.set_margin_start(12)
+        title_lbl.set_margin_bottom(2)
+        self.append(title_lbl)
+
+        # ── Drawing area ─────────────────────────────────────────────────────
+        self._canvas = Gtk.DrawingArea()
+        self._canvas.set_content_width(300)
+        self._canvas.set_content_height(120)
+        self._canvas.set_vexpand(False)
+        self._canvas.set_hexpand(True)
+        self._canvas.set_margin_start(8)
+        self._canvas.set_margin_end(8)
+        self._canvas.set_margin_bottom(4)
+        self._canvas.set_draw_func(self._draw_heatmap)
+        self._canvas.set_has_tooltip(True)
+        self._canvas.connect("query-tooltip", self._on_query_tooltip)
+        self.append(self._canvas)
+
+        # ── Motivational month labels (drawn below the heatmap) ──────────────
+        self._month_canvas = Gtk.DrawingArea()
+        self._month_canvas.set_content_height(18)
+        self._month_canvas.set_hexpand(True)
+        self._month_canvas.set_margin_start(8)
+        self._month_canvas.set_margin_end(8)
+        self._month_canvas.set_draw_func(self._draw_month_labels)
+        self.append(self._month_canvas)
+
+        # ── Legend ───────────────────────────────────────────────────────────
+        legend_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        legend_box.set_halign(Gtk.Align.END)
+        legend_box.set_margin_end(12)
+        legend_box.set_margin_top(2)
+        legend_box.set_margin_bottom(4)
+        less_lbl = Gtk.Label(label="Less")
+        less_lbl.add_css_class("caption")
+        less_lbl.add_css_class("dim-label")
+        legend_box.append(less_lbl)
+        self._legend_canvas = Gtk.DrawingArea()
+        self._legend_canvas.set_content_width(70)
+        self._legend_canvas.set_content_height(12)
+        self._legend_canvas.set_draw_func(self._draw_legend)
+        legend_box.append(self._legend_canvas)
+        more_lbl = Gtk.Label(label="More")
+        more_lbl.add_css_class("caption")
+        more_lbl.add_css_class("dim-label")
+        legend_box.append(more_lbl)
+        self.append(legend_box)
+
+        # Mouse tracking for tooltip
+        self._hover_date = None
+        motion = Gtk.EventControllerMotion()
+        motion.connect("motion", self._on_motion)
+        motion.connect("leave", lambda *_: self._set_hover(None))
+        self._canvas.add_controller(motion)
+
+        # Geometry cache (set in draw)
+        self._cell_size = 11
+        self._cell_gap  = 2
+        self._left_pad  = 24   # space for weekday labels
+        self._top_pad   = 2
+        self._num_weeks = 53
+
+    # ── public API ────────────────────────────────────────────────────────────
 
     def update_data(self, goals):
         self._goals = goals
-        self.queue_draw()
+        self._rebuild_daily_counts()
+        self._update_streak_labels()
+        self._canvas.queue_draw()
+        self._month_canvas.queue_draw()
+        self._legend_canvas.queue_draw()
 
-    def _draw_func(self, area, cr, width, height):
-        self._draw_monthly_bar_chart(cr, 10, 20, width - 20, height - 40)
+    # ── data helpers ──────────────────────────────────────────────────────────
 
-    def _draw_monthly_bar_chart(self, cr, x, y, width, height):
-        monthly_data = self._calculate_monthly_data()
-        if not monthly_data: return
-        
-        # Get last 12 months
-        sorted_keys = sorted(monthly_data.keys())
-        months = sorted_keys[-12:] if len(sorted_keys) >= 12 else sorted_keys
-        
-        scale_max = max([max(monthly_data[mk]['total'], monthly_data[mk]['completed']) for mk in months] + [1])
-        fg = self._style_context.get_color()
-        cr.set_source_rgba(fg.red, fg.green, fg.blue, fg.alpha)
-        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL); cr.set_font_size(12)
-        txt = "Monthly Completions"; (tx, ty, tw, th, dx, dy) = cr.text_extents(txt)
-        cr.move_to(x + width/2 - tw/2 - tx, y - 5); cr.show_text(txt)
-        
-        ax, ay, cw, ch = x + 30, y + 20, width - 40, height - 60
-        cr.set_line_width(2.5); cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.7)
-        cr.move_to(ax, ay); cr.line_to(ax, ay + ch); cr.line_to(ax + cw, ay + ch); cr.stroke()
-        
-        if months:
-            bw, bs = (cw / len(months) * 0.7), (cw / len(months))
-            for i, mk in enumerate(months):
-                d = monthly_data[mk]; c, t = d['completed'], d['total']
-                th_, ch_ = (t / scale_max) * ch, (c / scale_max) * ch
-                bx = ax + i * bs + (bs - bw) / 2
-                
-                # Draw total bar (light gray)
-                cr.set_source_rgba(0.85, 0.85, 0.85, 0.9)
-                cr.rectangle(bx, ay + ch - th_, bw, th_)
-                cr.fill()
-                
-                # Draw completed bar (green) overlapping
-                cr.set_source_rgb(0.15, 0.68, 0.37)
-                cr.rectangle(bx, ay + ch - ch_, bw, ch_)
-                cr.fill_preserve()
-                cr.set_line_width(1.0); cr.set_source_rgba(0,0,0,0.2); cr.stroke()
-                
-                # Draw month labels (rotated)
-                cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.9); cr.set_font_size(10)
-                try: ms = datetime.strptime(mk, '%Y-%m').strftime('%b')
-                except: ms = mk
-                (tx, ty, tw_, th, dx, dy) = cr.text_extents(ms)
-                
-                cr.save()
-                cr.move_to(bx + bw/2 + th/2, ay + ch + 10)
-                cr.rotate(math.pi / 2)
-                cr.show_text(ms)
-                cr.restore()
-                
-                # Draw values
-                if t > 0:
-                    vs = f"{int(c)}/{int(t)}"
-                    cr.set_source_rgba(fg.red, fg.green, fg.blue, fg.alpha)
-                    cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(8)
-                    (tx, ty, tw_, th, dx, dy) = cr.text_extents(vs)
-                    cr.move_to(bx + bw/2 - tw_/2 - tx, ay + ch - max(th_, ch_) - 5)
-                    cr.show_text(vs)
-            
-            # Draw Legend
-            lx, ly = ax + cw - 120, y - 5
-            
-            # Completed legend
-            cr.set_source_rgb(0.15, 0.68, 0.37)
-            cr.rectangle(lx, ly, 10, 10)
-            cr.fill()
-            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.8)
-            cr.set_font_size(10)
-            cr.move_to(lx + 15, ly + 9)
-            cr.show_text("Completed")
-            
-            # Total/Pending legend
-            cr.set_source_rgba(0.85, 0.85, 0.85, 0.9)
-            cr.rectangle(lx + 70, ly, 10, 10)
-            cr.fill()
-            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.8)
-            cr.move_to(lx + 85, ly + 9)
-            cr.show_text("Pending")
-
-    def _calculate_monthly_data(self):
-        monthly = defaultdict(lambda: {'completed': 0, 'total': 0})
-        
-        # Ensure last 12 months exist in data
-        today = date.today()
-        for i in range(12):
-            m = (today.month - i - 1) % 12 + 1
-            y = today.year + (today.month - i - 1) // 12
-            mk = f"{y}-{m:02}"
-            monthly[mk] = {'completed': 0, 'total': 0}
-
+    def _rebuild_daily_counts(self):
+        counts = defaultdict(int)
         for g in self._goals:
-            cd, ed = g.get('completion_date', ''), g.get('end_date', '')
+            cd = g.get("completion_date", "")
             if cd:
                 try:
-                    mk = datetime.strptime(cd, '%Y-%m-%d').strftime('%Y-%m')
-                    monthly[mk]['completed'] += 1; monthly[mk]['total'] += 1
-                except: pass
-            elif ed:
-                try:
-                    mk = datetime.strptime(ed, '%Y-%m-%d').strftime('%Y-%m')
-                    monthly[mk]['total'] += 1
-                except: pass
-            for t in g.get('tasks', []):
-                tc, tcs, tes = t.get('completed'), t.get('completion_date') or '', t.get('end_date') or ''
-                if tc:
-                    ds = tcs or tes or cd or ed
+                    counts[datetime.strptime(cd[:10], "%Y-%m-%d").date()] += 1
+                except Exception:
+                    pass
+            for t in g.get("tasks", []):
+                if t.get("completed"):
+                    ds = (t.get("completion_date") or t.get("end_date") or "")[:10]
                     if ds:
                         try:
-                            mk = datetime.strptime(ds, '%Y-%m-%d').strftime('%Y-%m')
-                            monthly[mk]['completed'] += 1; monthly[mk]['total'] += 1
-                        except: pass
+                            counts[datetime.strptime(ds, "%Y-%m-%d").date()] += 1
+                        except Exception:
+                            pass
+        self._daily_counts = dict(counts)
+
+    def _count_for(self, d):
+        return self._daily_counts.get(d, 0)
+
+    def _heat_level(self, count):
+        if count == 0: return 0
+        if count == 1: return 1
+        if count <= 3: return 2
+        if count <= 6: return 3
+        return 4
+
+    def _calc_streaks(self):
+        today = date.today()
+        current = 0
+        best = 0
+        streak = 0
+        d = today
+        while True:
+            if self._count_for(d) > 0:
+                streak += 1
+                best = max(best, streak)
+                d -= timedelta(days=1)
+            else:
+                break
+        current = streak
+        # full best-streak scan
+        streak = 0
+        start = today - timedelta(days=365)
+        d = start
+        while d <= today:
+            if self._count_for(d) > 0:
+                streak += 1
+                best = max(best, streak)
+            else:
+                streak = 0
+            d += timedelta(days=1)
+        return current, best
+
+    def _update_streak_labels(self):
+        current, best = self._calc_streaks()
+        total = sum(self._daily_counts.values())
+        self._streak_val.set_text(f"{current}d")
+        self._best_val.set_text(f"{best}d")
+        self._total_val.set_text(str(total))
+
+    # ── drawing ───────────────────────────────────────────────────────────────
+
+    def _week_start(self):
+        """Return the Sunday that starts the grid (53 weeks back from today)."""
+        today = date.today()
+        # Align to Sunday
+        start = today - timedelta(days=today.weekday() + 1)  # last Sunday
+        start = start - timedelta(weeks=self._num_weeks - 1)
+        return start
+
+    def _draw_heatmap(self, area, cr, width, height):
+        cs = self._cell_size
+        cg = self._cell_gap
+        step = cs + cg
+
+        lp = self._left_pad
+        tp = self._top_pad
+
+        # Dynamic cell size if canvas is wider
+        available_w = width - lp - 4
+        cs_dyn = max(8, min(14, (available_w // self._num_weeks) - cg))
+        step = cs_dyn + cg
+        self._cell_size = cs_dyn
+
+        start = self._week_start()
+
+        fg = self._canvas.get_style_context().get_color()
+
+        # Weekday labels (Mon, Wed, Fri)
+        cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.5)
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+        cr.set_font_size(8)
+        for row, label in [(0, "S"), (2, "T"), (4, "T"), (6, "S")]:
+            y_pos = tp + row * step + cs_dyn / 2 + 3
+            cr.move_to(2, y_pos)
+            cr.show_text(label)
+
+        # Draw cells
+        today = date.today()
+        for col in range(self._num_weeks):
+            for row in range(7):
+                d = start + timedelta(days=col * 7 + row)
+                if d > today:
+                    continue
+                count = self._count_for(d)
+                level = self._heat_level(count)
+                r_, g_, b_, a_ = self._HEAT_COLORS[level]
+
+                x0 = lp + col * step
+                y0 = tp + row * step
+                radius = 2.5
+
+                # Rounded rectangle
+                cr.new_sub_path()
+                cr.arc(x0 + cs_dyn - radius, y0 + radius, radius, -math.pi/2, 0)
+                cr.arc(x0 + cs_dyn - radius, y0 + cs_dyn - radius, radius, 0, math.pi/2)
+                cr.arc(x0 + radius, y0 + cs_dyn - radius, radius, math.pi/2, math.pi)
+                cr.arc(x0 + radius, y0 + radius, radius, math.pi, 3*math.pi/2)
+                cr.close_path()
+
+                # Glow effect for high-activity days
+                if level >= 3:
+                    cr.set_source_rgba(r_, g_, b_, 0.25)
+                    cr.fill_preserve()
+                    cr.set_source_rgba(r_, g_, b_, a_)
+                    cr.fill()
                 else:
-                    ds = tes or ed
-                    if ds:
-                        try:
-                            mk = datetime.strptime(ds, '%Y-%m-%d').strftime('%Y-%m')
-                            monthly[mk]['total'] += 1
-                        except: pass
-        return dict(sorted(monthly.items()))
+                    cr.set_source_rgba(r_, g_, b_, a_)
+                    cr.fill()
+
+                # Highlight today
+                if d == today:
+                    cr.new_sub_path()
+                    cr.arc(x0 + cs_dyn - radius, y0 + radius, radius, -math.pi/2, 0)
+                    cr.arc(x0 + cs_dyn - radius, y0 + cs_dyn - radius, radius, 0, math.pi/2)
+                    cr.arc(x0 + radius, y0 + cs_dyn - radius, radius, math.pi/2, math.pi)
+                    cr.arc(x0 + radius, y0 + radius, radius, math.pi, 3*math.pi/2)
+                    cr.close_path()
+                    cr.set_source_rgba(1.0, 0.85, 0.0, 0.9)
+                    cr.set_line_width(1.5)
+                    cr.stroke()
+
+    def _draw_month_labels(self, area, cr, width, height):
+        lp = self._left_pad
+        cg = self._cell_gap
+        step = self._cell_size + cg
+        start = self._week_start()
+
+        fg = self._canvas.get_style_context().get_color()
+        cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.6)
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+        cr.set_font_size(9)
+
+        last_month = -1
+        for col in range(self._num_weeks):
+            d = start + timedelta(days=col * 7)
+            if d.month != last_month:
+                last_month = d.month
+                label = d.strftime("%b")
+                x0 = lp + col * step
+                cr.move_to(x0, 12)
+                cr.show_text(label)
+
+    def _draw_legend(self, area, cr, width, height):
+        num = len(self._HEAT_COLORS)
+        sz = 10
+        gap = (width - num * sz) / (num + 1)
+        for i, (r_, g_, b_, a_) in enumerate(self._HEAT_COLORS):
+            x0 = gap + i * (sz + gap)
+            cr.rectangle(x0, 1, sz, sz)
+            cr.set_source_rgba(r_, g_, b_, max(a_, 0.4))
+            cr.fill()
+
+    # ── tooltip / hover ───────────────────────────────────────────────────────
+
+    def _cell_for_pos(self, x, y):
+        lp = self._left_pad
+        step = self._cell_size + self._cell_gap
+        col = int((x - lp) // step)
+        row = int((y - self._top_pad) // step)
+        if 0 <= col < self._num_weeks and 0 <= row < 7:
+            start = self._week_start()
+            d = start + timedelta(days=col * 7 + row)
+            if d <= date.today():
+                return d
+        return None
+
+    def _on_motion(self, ctrl, x, y):
+        self._set_hover(self._cell_for_pos(x, y))
+
+    def _set_hover(self, d):
+        self._hover_date = d
+
+    def _on_query_tooltip(self, widget, x, y, keyboard_mode, tooltip):
+        d = self._cell_for_pos(x, y)
+        if d is None:
+            return False
+        count = self._count_for(d)
+        label = d.strftime("%a, %d %b %Y")
+        if count == 0:
+            tooltip.set_text(f"{label}\nNo completions")
+        elif count == 1:
+            tooltip.set_text(f"{label}\n1 completion 🎯")
+        else:
+            tooltip.set_text(f"{label}\n{count} completions 🔥")
+        return True
 
 
 class NotificationWidget(Adw.Bin):

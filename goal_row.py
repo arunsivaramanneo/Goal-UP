@@ -667,7 +667,37 @@ class GoalRow(Adw.ExpanderRow):
             self._handle_recurrence(row)
             
         self._update_progress()
+        self._check_auto_complete()
         self.emit("goal-changed")
+
+    def _check_auto_complete(self) -> None:
+        """Auto-complete the goal when every task under it is complete."""
+        tasks = self.get_tasks()
+        if not tasks:
+            return  # No tasks → don't auto-complete
+        if self._completed:
+            return  # Already complete
+
+        if all(t.get("completed", False) for t in tasks):
+            # Determine the most recent task completion date
+            completion_dates = []
+            for t in tasks:
+                ds = t.get("completion_date") or t.get("end_date")
+                if ds:
+                    completion_dates.append(ds)
+            if completion_dates:
+                last_date = max(completion_dates)
+            else:
+                last_date = date.today().isoformat()
+
+            self._completion_date = last_date
+            self._completed = True
+            # Update the checkbox without triggering _on_check_toggled recursively
+            self.check_button.handler_block_by_func(self._on_check_toggled)
+            self.check_button.set_active(True)
+            self.check_button.handler_unblock_by_func(self._on_check_toggled)
+            self._update_style()
+            self._update_days_remaining()
 
     def _handle_recurrence(self, row: SubTaskRow) -> None:
         """Create the next instance of a recurring task."""
