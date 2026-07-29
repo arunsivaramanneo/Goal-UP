@@ -35,3 +35,6 @@ Cloud Sync: Goal-UP is currently local-only. There is no built-in sync across mu
 Collaboration: This is a personal productivity tool; it does not support shared goals or team features.
 Recurring Tasks: You must manually create each task; automated recurring schedules (daily/weekly) are not yet supported.
 Rich Text Support: Goal and task descriptions currently support plain text only.
+
+
+To install just clone the application and run ./install 
