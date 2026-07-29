@@ -2,6 +2,9 @@
 
 Goal UP is a streamlined Gtk4-based productivity tool designed to help you track your long-term goals and daily tasks with powerful visual feedback and GNOME integration.
 
+<img width="1302" height="928" alt="Screenshot From 2026-07-29 19-22-26" src="https://github.com/user-attachments/assets/d04245a6-274d-4e61-8388-e5ba31842ac0" />
+
+
 🚀 Key Features
 Goal & Task Hierarchy: Organize your life by grouping specific tasks under high-level goals.
 Dependency Management: Set parent-child relationships between goals and tasks to build a structured roadmap.
