@@ -458,8 +458,9 @@ class MainWindow(Adw.ApplicationWindow):
         if not text:
             return
 
-        color = self.color_button.get_rgba().to_string()
-        self._add_goal(text, "", False, [], None, color=color)
+        current_color = self.color_button.get_rgba().to_string()
+        mandatory_end_date = date.today().isoformat()
+        self._add_goal(text, "", False, [], None, end_date=mandatory_end_date, color=current_color)
         self.goal_entry.set_text("")
         self._set_random_color()
         self._reorder_goals()
@@ -541,13 +542,18 @@ class MainWindow(Adw.ApplicationWindow):
             
         goals = load_tasks()
         for goal in goals:
+            g_end_date = goal.get("end_date") or date.today().isoformat()
+            g_tasks = goal.get("tasks", [])
+            for t in g_tasks:
+                if not t.get("end_date"):
+                    t["end_date"] = g_end_date
             self._add_goal(
                 goal.get("title", goal.get("text", "")),  # Backward compat
                 goal.get("description", ""),
                 goal.get("completed", False),
-                goal.get("tasks", []),
+                g_tasks,
                 goal.get("created_at"),
-                goal.get("end_date"),
+                g_end_date,
                 goal.get("id"),
                 goal.get("parent_id", ""),
                 goal.get("depth", 0),

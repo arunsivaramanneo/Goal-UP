@@ -767,8 +767,10 @@ class GoalRow(Adw.ExpanderRow):
         text = self.task_entry.get_text().strip()
         if not text:
             return
-        self._add_subtask(text, False)
+        mandatory_end_date = self._end_date or date.today().isoformat()
+        self._add_subtask(text, False, end_date=mandatory_end_date)
         self.task_entry.set_text("")
+        self.reorder_tasks()
         self._update_progress()
         self.emit("goal-changed")
 

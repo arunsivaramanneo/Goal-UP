@@ -341,12 +341,16 @@ class GoalTrendWidget(Gtk.Box):
     def _rebuild_daily_counts(self):
         counts = defaultdict(int)
         for g in self._goals:
-            cd = g.get("completion_date", "")
-            if cd:
-                try:
-                    counts[datetime.strptime(cd[:10], "%Y-%m-%d").date()] += 1
-                except Exception:
-                    pass
+            if g.get("completed"):
+                ds = (g.get("completion_date") or g.get("end_date") or "")[:10]
+                if ds:
+                    try:
+                        counts[datetime.strptime(ds, "%Y-%m-%d").date()] += 1
+                    except Exception:
+                        pass
+                else:
+                    counts[date.today()] += 1
+
             for t in g.get("tasks", []):
                 if t.get("completed"):
                     ds = (t.get("completion_date") or t.get("end_date") or "")[:10]
@@ -355,6 +359,8 @@ class GoalTrendWidget(Gtk.Box):
                             counts[datetime.strptime(ds, "%Y-%m-%d").date()] += 1
                         except Exception:
                             pass
+                    else:
+                        counts[date.today()] += 1
         self._daily_counts = dict(counts)
 
     def _count_for(self, d):
@@ -368,37 +374,24 @@ class GoalTrendWidget(Gtk.Box):
         return 4
 
     def _calc_streaks(self):
+        """Calculate Current Month completions and Best Month max completions."""
         today = date.today()
-        current = 0
-        best = 0
-        streak = 0
-        d = today
-        while True:
-            if self._count_for(d) > 0:
-                streak += 1
-                best = max(best, streak)
-                d -= timedelta(days=1)
-            else:
-                break
-        current = streak
-        # full best-streak scan
-        streak = 0
-        start = today - timedelta(days=365)
-        d = start
-        while d <= today:
-            if self._count_for(d) > 0:
-                streak += 1
-                best = max(best, streak)
-            else:
-                streak = 0
-            d += timedelta(days=1)
-        return current, best
+        monthly_counts = defaultdict(int)
+        for d, count in self._daily_counts.items():
+            if count > 0:
+                monthly_counts[(d.year, d.month)] += count
+
+        curr_y, curr_m = today.year, today.month
+        current_month_done = monthly_counts.get((curr_y, curr_m), 0)
+        best_month_max = max(monthly_counts.values()) if monthly_counts else 0
+
+        return current_month_done, best_month_max
 
     def _update_streak_labels(self):
-        current, best = self._calc_streaks()
+        current_month_done, best_month_max = self._calc_streaks()
         total = sum(self._daily_counts.values())
-        self._streak_val.set_text(f"{current}d")
-        self._best_val.set_text(f"{best}d")
+        self._streak_val.set_text(str(current_month_done))
+        self._best_val.set_text(str(best_month_max))
         self._total_val.set_text(str(total))
 
     # ── drawing ───────────────────────────────────────────────────────────────

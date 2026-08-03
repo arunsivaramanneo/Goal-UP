@@ -221,6 +221,53 @@ class DesktopWidget(Gtk.Window):
         icon_lbl.set_halign(Gtk.Align.START)
         title_bar.append(icon_lbl)
 
+        # Position menu button
+        pos_button = Gtk.MenuButton()
+        pos_button.set_icon_name("view-grid-symbolic")
+        pos_button.add_css_class("flat")
+        pos_button.add_css_class("circular")
+        pos_button.set_valign(Gtk.Align.CENTER)
+        pos_button.set_tooltip_text("Move Widget Position")
+        title_bar.append(pos_button)
+
+        pos_popover = Gtk.Popover()
+        pos_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        pos_box.set_margin_top(8)
+        pos_box.set_margin_bottom(8)
+        pos_box.set_margin_start(8)
+        pos_box.set_margin_end(8)
+
+        pos_lbl = Gtk.Label(label="Position Preset")
+        pos_lbl.add_css_class("caption")
+        pos_lbl.add_css_class("dim-label")
+        pos_box.append(pos_lbl)
+
+        grid = Gtk.Grid()
+        grid.set_row_spacing(4)
+        grid.set_column_spacing(4)
+
+        positions = [
+            ("Top Left", "top_left", 0, 0),
+            ("Top Center", "top_center", 0, 1),
+            ("Top Right", "top_right", 0, 2),
+            ("Center Left", "center_left", 1, 0),
+            ("Center", "center", 1, 1),
+            ("Center Right", "center_right", 1, 2),
+            ("Bottom Left", "bottom_left", 2, 0),
+            ("Bottom Center", "bottom_center", 2, 1),
+            ("Bottom Right", "bottom_right", 2, 2),
+        ]
+
+        for label, pos_key, row, col in positions:
+            btn = Gtk.Button(label=label)
+            btn.add_css_class("flat")
+            btn.connect("clicked", self._on_move_position_clicked, pos_key, pos_popover)
+            grid.attach(btn, col, row, 1, 1)
+
+        pos_box.append(grid)
+        pos_popover.set_child(pos_box)
+        pos_button.set_popover(pos_popover)
+
         close_btn = Gtk.Button(icon_name="window-close-symbolic")
         close_btn.add_css_class("flat")
         close_btn.add_css_class("circular")
@@ -362,6 +409,71 @@ class DesktopWidget(Gtk.Window):
         if surface:
             try:
                 surface.move(int(wx), int(wy))
+            except Exception:
+                pass
+
+    def _on_move_position_clicked(self, button: Gtk.Button, pos_key: str, popover: Gtk.Popover) -> None:
+        """Move widget to predefined screen position."""
+        popover.popdown()
+
+        display = Gdk.Display.get_default()
+        if not display:
+            return
+
+        monitors = display.get_monitors()
+        if not monitors or monitors.get_n_items() == 0:
+            return
+
+        monitor = monitors.get_item(0)
+        geom = monitor.get_geometry()
+
+        screen_w = geom.width
+        screen_h = geom.height
+        offset_x = geom.x
+        offset_y = geom.y
+
+        widget_w = 300
+        widget_h = 260
+        margin = 40
+
+        if pos_key == "top_left":
+            new_x = offset_x + margin
+            new_y = offset_y + margin
+        elif pos_key == "top_center":
+            new_x = offset_x + (screen_w - widget_w) // 2
+            new_y = offset_y + margin
+        elif pos_key == "top_right":
+            new_x = offset_x + screen_w - widget_w - margin
+            new_y = offset_y + margin
+        elif pos_key == "center_left":
+            new_x = offset_x + margin
+            new_y = offset_y + (screen_h - widget_h) // 2
+        elif pos_key == "center":
+            new_x = offset_x + (screen_w - widget_w) // 2
+            new_y = offset_y + (screen_h - widget_h) // 2
+        elif pos_key == "center_right":
+            new_x = offset_x + screen_w - widget_w - margin
+            new_y = offset_y + (screen_h - widget_h) // 2
+        elif pos_key == "bottom_left":
+            new_x = offset_x + margin
+            new_y = offset_y + screen_h - widget_h - margin - 40
+        elif pos_key == "bottom_center":
+            new_x = offset_x + (screen_w - widget_w) // 2
+            new_y = offset_y + screen_h - widget_h - margin - 40
+        elif pos_key == "bottom_right":
+            new_x = offset_x + screen_w - widget_w - margin
+            new_y = offset_y + screen_h - widget_h - margin - 40
+        else:
+            return
+
+        self._settings["widget_x"] = new_x
+        self._settings["widget_y"] = new_y
+        self._save_settings(self._settings)
+
+        surface = self.get_surface()
+        if surface:
+            try:
+                surface.move(int(new_x), int(new_y))
             except Exception:
                 pass
 

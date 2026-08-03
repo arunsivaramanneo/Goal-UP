@@ -6,7 +6,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk, Gdk, GObject, GLib
-from datetime import datetime
+from datetime import datetime, date
 
 
 class EditGoalDialog(Adw.Dialog):
@@ -83,14 +83,16 @@ class EditGoalDialog(Adw.Dialog):
         self.desc_row.set_text(description)
         desc_group.add(self.desc_row)
 
-        # End date group (optional)
+        # End date group (Required)
         date_group = Adw.PreferencesGroup()
-        date_group.set_title("End Date (Optional)")
+        date_group.set_title("End Date (Required)")
         content_box.append(date_group)
+
+        self._chosen_date = end_date or date.today().isoformat()
 
         self.date_row = Adw.ActionRow()
         self.date_row.set_title("End Date")
-        self.date_row.set_subtitle(end_date or "No date set")
+        self.date_row.set_subtitle(self._chosen_date)
         date_group.add(self.date_row)
 
         # Date picker button
@@ -100,13 +102,6 @@ class EditGoalDialog(Adw.Dialog):
         self.pick_date_btn.add_css_class("flat")
         self.pick_date_btn.connect("clicked", self._on_pick_date_clicked)
         self.date_row.add_suffix(self.pick_date_btn)
-
-        # Clear date button
-        clear_date_btn = Gtk.Button(label="Clear")
-        clear_date_btn.add_css_class("flat")
-        clear_date_btn.set_valign(Gtk.Align.CENTER)
-        clear_date_btn.connect("clicked", self._on_clear_date_clicked)
-        self.date_row.add_suffix(clear_date_btn)
 
         # End time group (optional)
         time_group = Adw.PreferencesGroup()
@@ -200,7 +195,7 @@ class EditGoalDialog(Adw.Dialog):
             
         self.color_row.add_suffix(self.color_button)
 
-        self._chosen_date = end_date
+        self._chosen_date = end_date or date.today().isoformat()
 
     def _on_pick_date_clicked(self, button: Gtk.Button) -> None:
         """Open a calendar popover."""
@@ -352,7 +347,7 @@ class EditGoalDialog(Adw.Dialog):
         else:
             parent_id = self._possible_parents[parent_idx - 1][0]
         
-        if title:
+        if title and end_date:
             color = self.color_button.get_rgba().to_string()
             self.emit("save", title, description, end_date, parent_id, color, self._chosen_time, self._chosen_completion_date)
             self.close()
@@ -423,14 +418,16 @@ class EditTaskDialog(Adw.Dialog):
         self.text_row.set_text(text)
         group.add(self.text_row)
 
-        # End date group (optional)
+        # End date group (Required)
         date_group = Adw.PreferencesGroup()
-        date_group.set_title("End Date (Optional)")
+        date_group.set_title("End Date (Required)")
         content_box.append(date_group)
+
+        self._chosen_date = end_date or date.today().isoformat()
 
         self.date_row = Adw.ActionRow()
         self.date_row.set_title("End Date")
-        self.date_row.set_subtitle(end_date or "No date set")
+        self.date_row.set_subtitle(self._chosen_date)
         date_group.add(self.date_row)
 
         # Date picker button
@@ -440,13 +437,6 @@ class EditTaskDialog(Adw.Dialog):
         self.pick_date_btn.add_css_class("flat")
         self.pick_date_btn.connect("clicked", self._on_pick_date_clicked)
         self.date_row.add_suffix(self.pick_date_btn)
-
-        # Clear button
-        clear_btn = Gtk.Button(label="Clear")
-        clear_btn.add_css_class("flat")
-        clear_btn.set_valign(Gtk.Align.CENTER)
-        clear_btn.connect("clicked", self._on_clear_date_clicked)
-        self.date_row.add_suffix(clear_btn)
 
         # End time group (optional)
         time_group = Adw.PreferencesGroup()
@@ -564,7 +554,7 @@ class EditTaskDialog(Adw.Dialog):
             days_box.append(btn)
             self.day_buttons.append(btn)
 
-        self._chosen_date = end_date
+        self._chosen_date = end_date or date.today().isoformat()
 
     def _on_recurrence_changed(self, row: Adw.ComboRow, pspec) -> None:
         """Handle recurrence change."""
@@ -721,7 +711,7 @@ class EditTaskDialog(Adw.Dialog):
         else:
             parent_id = self._possible_parents[parent_idx - 1][0]
 
-        if text:
+        if text and end_date:
             # Get recurrence info
             recurrence_idx = self.recurrence_row.get_selected()
             recurrence_options = ["none", "daily", "weekly", "monthly"]

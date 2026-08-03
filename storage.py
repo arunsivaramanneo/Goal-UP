@@ -22,7 +22,7 @@ def get_settings_path() -> Path:
 def load_settings() -> dict:
     """Load settings from the JSON file."""
     path = get_settings_path()
-    default_settings = {"theme": "light"}
+    default_settings = {"theme": "light", "widget_visible": False}
     
     if not path.exists():
         return default_settings
@@ -33,6 +33,8 @@ def load_settings() -> dict:
             # Ensure default theme if missing
             if "theme" not in settings:
                 settings["theme"] = "light"
+            if "widget_visible" not in settings:
+                settings["widget_visible"] = False
             return settings
     except (json.JSONDecodeError, IOError):
         return default_settings
