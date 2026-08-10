@@ -88,11 +88,11 @@ class EditGoalDialog(Adw.Dialog):
         date_group.set_title("End Date (Required)")
         content_box.append(date_group)
 
-        self._chosen_date = end_date or date.today().isoformat()
+        self._chosen_date = end_date
 
         self.date_row = Adw.ActionRow()
         self.date_row.set_title("End Date")
-        self.date_row.set_subtitle(self._chosen_date)
+        self.date_row.set_subtitle(self._chosen_date or "No date set")
         date_group.add(self.date_row)
 
         # Date picker button
@@ -102,6 +102,13 @@ class EditGoalDialog(Adw.Dialog):
         self.pick_date_btn.add_css_class("flat")
         self.pick_date_btn.connect("clicked", self._on_pick_date_clicked)
         self.date_row.add_suffix(self.pick_date_btn)
+
+        # Clear date button
+        clear_date_btn = Gtk.Button(label="Clear")
+        clear_date_btn.add_css_class("flat")
+        clear_date_btn.set_valign(Gtk.Align.CENTER)
+        clear_date_btn.connect("clicked", self._on_clear_date_clicked)
+        self.date_row.add_suffix(clear_date_btn)
 
         # End time group (optional)
         time_group = Adw.PreferencesGroup()
@@ -194,8 +201,6 @@ class EditGoalDialog(Adw.Dialog):
             self.color_button.set_rgba(color)
             
         self.color_row.add_suffix(self.color_button)
-
-        self._chosen_date = end_date or date.today().isoformat()
 
     def _on_pick_date_clicked(self, button: Gtk.Button) -> None:
         """Open a calendar popover."""
@@ -340,17 +345,36 @@ class EditGoalDialog(Adw.Dialog):
         title = self.title_row.get_text().strip()
         description = self.desc_row.get_text().strip()
         end_date = self._chosen_date
-        
+
+        if not title:
+            dialog = Adw.MessageDialog(
+                heading="Missing Title",
+                body="Please enter a title for the goal."
+            )
+            dialog.add_response("ok", "OK")
+            dialog.set_default_response("ok")
+            dialog.present(self)
+            return
+
+        if not end_date:
+            dialog = Adw.MessageDialog(
+                heading="Missing End Date",
+                body="Dreams without an end date will remain Dreams :)"
+            )
+            dialog.add_response("ok", "OK")
+            dialog.set_default_response("ok")
+            dialog.present(self)
+            return
+
         parent_idx = self.parent_row.get_selected()
         if parent_idx == 0:
             parent_id = ""
         else:
             parent_id = self._possible_parents[parent_idx - 1][0]
         
-        if title and end_date:
-            color = self.color_button.get_rgba().to_string()
-            self.emit("save", title, description, end_date, parent_id, color, self._chosen_time, self._chosen_completion_date)
-            self.close()
+        color = self.color_button.get_rgba().to_string()
+        self.emit("save", title, description, end_date, parent_id, color, self._chosen_time, self._chosen_completion_date)
+        self.close()
 
 
 class EditTaskDialog(Adw.Dialog):
@@ -423,11 +447,11 @@ class EditTaskDialog(Adw.Dialog):
         date_group.set_title("End Date (Required)")
         content_box.append(date_group)
 
-        self._chosen_date = end_date or date.today().isoformat()
+        self._chosen_date = end_date
 
         self.date_row = Adw.ActionRow()
         self.date_row.set_title("End Date")
-        self.date_row.set_subtitle(self._chosen_date)
+        self.date_row.set_subtitle(self._chosen_date or "No date set")
         date_group.add(self.date_row)
 
         # Date picker button
@@ -437,6 +461,13 @@ class EditTaskDialog(Adw.Dialog):
         self.pick_date_btn.add_css_class("flat")
         self.pick_date_btn.connect("clicked", self._on_pick_date_clicked)
         self.date_row.add_suffix(self.pick_date_btn)
+
+        # Clear date button
+        clear_date_btn = Gtk.Button(label="Clear")
+        clear_date_btn.add_css_class("flat")
+        clear_date_btn.set_valign(Gtk.Align.CENTER)
+        clear_date_btn.connect("clicked", self._on_clear_date_clicked)
+        self.date_row.add_suffix(clear_date_btn)
 
         # End time group (optional)
         time_group = Adw.PreferencesGroup()
@@ -553,8 +584,6 @@ class EditTaskDialog(Adw.Dialog):
                 btn.set_active(True)
             days_box.append(btn)
             self.day_buttons.append(btn)
-
-        self._chosen_date = end_date or date.today().isoformat()
 
     def _on_recurrence_changed(self, row: Adw.ComboRow, pspec) -> None:
         """Handle recurrence change."""
@@ -704,6 +733,26 @@ class EditTaskDialog(Adw.Dialog):
         """Handle save button click."""
         text = self.text_row.get_text().strip()
         end_date = self._chosen_date
+
+        if not text:
+            dialog = Adw.MessageDialog(
+                heading="Missing Description",
+                body="Please enter a description for the task."
+            )
+            dialog.add_response("ok", "OK")
+            dialog.set_default_response("ok")
+            dialog.present(self)
+            return
+
+        if not end_date:
+            dialog = Adw.MessageDialog(
+                heading="Missing End Date",
+                body="Dreams without an end date will remain Dreams :)"
+            )
+            dialog.add_response("ok", "OK")
+            dialog.set_default_response("ok")
+            dialog.present(self)
+            return
         
         parent_idx = self.parent_row.get_selected()
         if parent_idx == 0:
@@ -711,17 +760,16 @@ class EditTaskDialog(Adw.Dialog):
         else:
             parent_id = self._possible_parents[parent_idx - 1][0]
 
-        if text and end_date:
-            # Get recurrence info
-            recurrence_idx = self.recurrence_row.get_selected()
-            recurrence_options = ["none", "daily", "weekly", "monthly"]
-            recurrence = recurrence_options[recurrence_idx]
-            
-            recurrence_days_list = []
-            for i, btn in enumerate(self.day_buttons):
-                if btn.get_active():
-                    recurrence_days_list.append(str(i))
-            recurrence_days = ",".join(recurrence_days_list)
+        # Get recurrence info
+        recurrence_idx = self.recurrence_row.get_selected()
+        recurrence_options = ["none", "daily", "weekly", "monthly"]
+        recurrence = recurrence_options[recurrence_idx]
+        
+        recurrence_days_list = []
+        for i, btn in enumerate(self.day_buttons):
+            if btn.get_active():
+                recurrence_days_list.append(str(i))
+        recurrence_days = ",".join(recurrence_days_list)
 
-            self.emit("save", text, end_date, parent_id, self._chosen_time, self._chosen_completion_date, recurrence, recurrence_days)
-            self.close()
+        self.emit("save", text, end_date, parent_id, self._chosen_time, self._chosen_completion_date, recurrence, recurrence_days)
+        self.close()

@@ -196,10 +196,113 @@ class GoalPieChartsWidget(Gtk.DrawingArea):
         cr.move_to(center_x - lw / 2 - lx, center_y + radius + 30); cr.show_text(lbl)
 
 
+class GoalProgressBarWidget(Gtk.DrawingArea):
+    """Custom graphical progress bar for a goal showing monthly progress."""
+
+    def __init__(self, color_hex, completed_prior, completed_month, total_tasks):
+        super().__init__()
+        self.set_content_height(20)
+        self.set_hexpand(True)
+        self.set_draw_func(self._draw_func)
+
+        self._color_hex = color_hex
+        self._completed_prior = completed_prior
+        self._completed_month = completed_month
+        self._total_tasks = max(total_tasks, 1)
+
+    def update_data(self, color_hex, completed_prior, completed_month, total_tasks):
+        self._color_hex = color_hex
+        self._completed_prior = completed_prior
+        self._completed_month = completed_month
+        self._total_tasks = max(total_tasks, 1)
+        self.queue_draw()
+
+    def _parse_color(self, color_str):
+        if not color_str: return (0.2, 0.5, 0.9)
+        color_str = color_str.strip()
+        if (color_str.startswith("rgb(") or color_str.startswith("rgba(")) and color_str.endswith(")"):
+            try:
+                inside = color_str[color_str.find("(") + 1: color_str.rfind(")")]
+                parts = [p.strip() for p in inside.split(",")]
+                if len(parts) >= 3:
+                    r, g, b = float(parts[0]), float(parts[1]), float(parts[2])
+                    def norm(v): return max(0.0, min(1.0, v / 255.0)) if v > 1.0 else max(0.0, min(1.0, v))
+                    return (norm(r), norm(g), norm(b))
+            except: pass
+        c = Gdk.RGBA()
+        if c.parse(color_str): return (c.red, c.green, c.blue)
+        return (0.2, 0.5, 0.9)
+
+    def _draw_func(self, area, cr, width, height):
+        r, g, b = self._parse_color(self._color_hex)
+        bar_h = 12
+        y0 = (height - bar_h) / 2
+        radius = bar_h / 2
+
+        # Draw track background
+        cr.new_path()
+        cr.arc(width - radius, y0 + radius, radius, -math.pi/2, math.pi/2)
+        cr.arc(radius, y0 + radius, radius, math.pi/2, 3*math.pi/2)
+        cr.close_path()
+        cr.set_source_rgba(0.5, 0.5, 0.5, 0.15)
+        cr.fill()
+
+        n = self._total_tasks
+        p = self._completed_prior
+        m = self._completed_month
+        total_done = p + m
+
+        w_prior = (p / n) * width
+        w_month = (m / n) * width
+        w_total = min(width, (total_done / n) * width)
+
+        # Draw prior completed segment (muted goal color)
+        if p > 0 and w_prior > 0:
+            cr.new_path()
+            if w_prior >= width - 1:
+                cr.arc(width - radius, y0 + radius, radius, -math.pi/2, math.pi/2)
+            else:
+                cr.rectangle(w_prior - 2, y0, 2, bar_h)
+            cr.arc(radius, y0 + radius, radius, math.pi/2, 3*math.pi/2)
+            cr.close_path()
+            cr.set_source_rgba(r * 0.6, g * 0.6, b * 0.6, 0.75)
+            cr.fill()
+
+        # Draw month completed segment (vibrant goal color)
+        if m > 0 and w_month > 0:
+            x_start = w_prior
+            x_end = w_total
+            cr.new_path()
+            if x_start <= 1:
+                cr.arc(radius, y0 + radius, radius, math.pi/2, 3*math.pi/2)
+            else:
+                cr.rectangle(x_start, y0, 2, bar_h)
+
+            if x_end >= width - 1:
+                cr.arc(width - radius, y0 + radius, radius, -math.pi/2, math.pi/2)
+            else:
+                cr.rectangle(x_end - 2, y0, 2, bar_h)
+
+            cr.rectangle(x_start, y0, max(0, x_end - x_start), bar_h)
+            cr.close_path()
+            cr.set_source_rgba(r, g, b, 0.95)
+            cr.fill()
+
+        # Outline border
+        cr.new_path()
+        cr.arc(width - radius, y0 + radius, radius, -math.pi/2, math.pi/2)
+        cr.arc(radius, y0 + radius, radius, math.pi/2, 3*math.pi/2)
+        cr.close_path()
+        cr.set_source_rgba(0, 0, 0, 0.15)
+        cr.set_line_width(1.0)
+        cr.stroke()
+
+
 class GoalTrendWidget(Gtk.Box):
     """
     Motivational heatmap widget — GitHub-style daily contribution graph
-    showing task/goal completions over the past year, plus streak stats.
+    showing task/goal completions over the past year, plus streak stats
+    and monthly goal progress details.
     """
 
     # Heatmap colour levels (light → vibrant) — works on both themes
@@ -250,11 +353,11 @@ class GoalTrendWidget(Gtk.Box):
             card.append(ico)
             card.append(val)
             card.append(lbl)
-            return card, val
+            return card, val, lbl
 
-        streak_card, self._streak_val   = _stat_card("🔥", "Current Streak", "accent")
-        best_card,   self._best_val     = _stat_card("🏆", "Best Streak",    "success")
-        total_card,  self._total_val    = _stat_card("✅", "Total Done",      "")
+        streak_card, self._streak_val, self._streak_lbl = _stat_card("🔥", "Current Streak", "accent")
+        best_card,   self._best_val,   self._best_lbl   = _stat_card("🏆", "Best Streak",    "success")
+        total_card,  self._total_val,  self._total_lbl  = _stat_card("✅", "Total Done",      "")
 
         stats_box.append(streak_card)
         stats_box.append(best_card)
@@ -312,6 +415,14 @@ class GoalTrendWidget(Gtk.Box):
         legend_box.append(more_lbl)
         self.append(legend_box)
 
+        # ── Monthly Goal Progress Section ────────────────────────────────────
+        self._progress_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._progress_section.set_margin_top(14)
+        self._progress_section.set_margin_bottom(8)
+        self._progress_section.set_margin_start(8)
+        self._progress_section.set_margin_end(8)
+        self.append(self._progress_section)
+
         # Mouse tracking for tooltip
         self._hover_date = None
         motion = Gtk.EventControllerMotion()
@@ -332,6 +443,7 @@ class GoalTrendWidget(Gtk.Box):
         self._goals = goals
         self._rebuild_daily_counts()
         self._update_streak_labels()
+        self._update_monthly_progress_section()
         self._canvas.queue_draw()
         self._month_canvas.queue_draw()
         self._legend_canvas.queue_draw()
@@ -340,28 +452,38 @@ class GoalTrendWidget(Gtk.Box):
 
     def _rebuild_daily_counts(self):
         counts = defaultdict(int)
+        items = defaultdict(list)
         for g in self._goals:
+            g_title = g.get("title", g.get("text", "Untitled Goal"))
             if g.get("completed"):
                 ds = (g.get("completion_date") or g.get("end_date") or "")[:10]
+                d = None
                 if ds:
                     try:
-                        counts[datetime.strptime(ds, "%Y-%m-%d").date()] += 1
+                        d = datetime.strptime(ds, "%Y-%m-%d").date()
                     except Exception:
                         pass
-                else:
-                    counts[date.today()] += 1
+                if not d:
+                    d = date.today()
+                counts[d] += 1
+                items[d].append(f"🎯 Goal: {g_title}")
 
             for t in g.get("tasks", []):
+                t_text = t.get("text", "Untitled Task")
                 if t.get("completed"):
                     ds = (t.get("completion_date") or t.get("end_date") or "")[:10]
+                    d = None
                     if ds:
                         try:
-                            counts[datetime.strptime(ds, "%Y-%m-%d").date()] += 1
+                            d = datetime.strptime(ds, "%Y-%m-%d").date()
                         except Exception:
                             pass
-                    else:
-                        counts[date.today()] += 1
+                    if not d:
+                        d = date.today()
+                    counts[d] += 1
+                    items[d].append(f"✅ Task: {t_text} ({g_title})")
         self._daily_counts = dict(counts)
+        self._daily_items = dict(items)
 
     def _count_for(self, d):
         return self._daily_counts.get(d, 0)
@@ -383,16 +505,190 @@ class GoalTrendWidget(Gtk.Box):
 
         curr_y, curr_m = today.year, today.month
         current_month_done = monthly_counts.get((curr_y, curr_m), 0)
-        best_month_max = max(monthly_counts.values()) if monthly_counts else 0
+        current_month_name = today.strftime("%b")
 
-        return current_month_done, best_month_max
+        if monthly_counts:
+            best_ym = max(monthly_counts, key=monthly_counts.get)
+            best_month_max = monthly_counts[best_ym]
+            best_month_name = date(best_ym[0], best_ym[1], 1).strftime("%b")
+        else:
+            best_month_max = 0
+            best_month_name = today.strftime("%b")
+
+        return current_month_done, current_month_name, best_month_max, best_month_name
 
     def _update_streak_labels(self):
-        current_month_done, best_month_max = self._calc_streaks()
+        curr_done, curr_month, best_max, best_month = self._calc_streaks()
         total = sum(self._daily_counts.values())
-        self._streak_val.set_text(str(current_month_done))
-        self._best_val.set_text(str(best_month_max))
+        self._streak_val.set_text(str(curr_done))
+        self._streak_lbl.set_text(f"Current Streak - {curr_month}")
+
+        self._best_val.set_text(str(best_max))
+        self._best_lbl.set_text(f"Best Streak - {best_month}")
+
         self._total_val.set_text(str(total))
+        self._total_lbl.set_text("Total Done")
+
+    def _update_monthly_progress_section(self):
+        # Clear previous items
+        child = self._progress_section.get_first_child()
+        while child:
+            next_child = child.get_next_sibling()
+            self._progress_section.remove(child)
+            child = next_child
+
+        today = date.today()
+        curr_y, curr_m = today.year, today.month
+        month_name = today.strftime("%B")
+
+        # Section Header
+        hdr_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        hdr_box.set_margin_bottom(4)
+
+        hdr_lbl = Gtk.Label(label=f"Goals Progressed in {month_name}")
+        hdr_lbl.add_css_class("heading")
+        hdr_lbl.set_halign(Gtk.Align.START)
+        hdr_lbl.set_hexpand(True)
+        hdr_box.append(hdr_lbl)
+
+        self._progress_section.append(hdr_box)
+
+        # Collect progress per goal for this month
+        progressed_goals = []
+        for g in self._goals:
+            g_title = g.get("title", g.get("text", "Untitled Goal"))
+            color_hex = g.get("color") or "#3584e4"
+            tasks = g.get("tasks", [])
+            total_tasks = len(tasks)
+
+            completed_month = 0
+            completed_prior = 0
+
+            for t in tasks:
+                if t.get("completed"):
+                    cd = t.get("completion_date") or t.get("end_date") or ""
+                    t_date = None
+                    if cd:
+                        try:
+                            t_date = datetime.strptime(cd[:10], "%Y-%m-%d").date()
+                        except: pass
+                    if not t_date:
+                        t_date = today
+
+                    if t_date.year == curr_y and t_date.month == curr_m:
+                        completed_month += 1
+                    else:
+                        completed_prior += 1
+
+            # Check if goal itself was completed this month
+            g_completed_this_month = False
+            if g.get("completed"):
+                gcd = g.get("completion_date") or g.get("end_date") or ""
+                g_date = None
+                if gcd:
+                    try:
+                        g_date = datetime.strptime(gcd[:10], "%Y-%m-%d").date()
+                    except: pass
+                if not g_date:
+                    g_date = today
+                if g_date.year == curr_y and g_date.month == curr_m:
+                    g_completed_this_month = True
+
+            if completed_month > 0 or g_completed_this_month:
+                eff_total = max(total_tasks, 1 if g_completed_this_month else 0)
+                eff_month = completed_month if completed_month > 0 else (1 if g_completed_this_month else 0)
+                progressed_goals.append({
+                    "goal": g,
+                    "title": g_title,
+                    "color": color_hex,
+                    "total_tasks": eff_total,
+                    "completed_month": eff_month,
+                    "completed_prior": completed_prior,
+                    "is_goal_completed": g_completed_this_month
+                })
+
+        if not progressed_goals:
+            empty_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            empty_card.add_css_class("card")
+            empty_card.set_margin_top(4)
+            empty_card.set_margin_bottom(4)
+            empty_card.set_margin_start(4)
+            empty_card.set_margin_end(4)
+
+            lbl = Gtk.Label(label=f"No goals progressed yet in {month_name}")
+            lbl.add_css_class("body")
+            lbl.add_css_class("dim-label")
+            lbl.set_halign(Gtk.Align.CENTER)
+            empty_card.append(lbl)
+
+            sub_lbl = Gtk.Label(label="Complete tasks to see monthly goal activity here!")
+            sub_lbl.add_css_class("caption")
+            sub_lbl.add_css_class("dim-label")
+            sub_lbl.set_halign(Gtk.Align.CENTER)
+            empty_card.append(sub_lbl)
+
+            self._progress_section.append(empty_card)
+        else:
+            for item in progressed_goals:
+                card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                card.add_css_class("card")
+                card.set_margin_top(4)
+                card.set_margin_bottom(4)
+                card.set_margin_start(4)
+                card.set_margin_end(4)
+
+                # Header row in card
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                
+                # Color dot/pill
+                dot = Gtk.Box()
+                dot.set_size_request(10, 10)
+                dot.set_valign(Gtk.Align.CENTER)
+                c_clean = item["color"] if (item["color"].startswith("#") or item["color"].startswith("rgb")) else f"#{item['color']}"
+                provider = Gtk.CssProvider()
+                provider.load_from_data(f"box {{ background-color: {c_clean}; border-radius: 5px; }}".encode())
+                dot.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+                row.append(dot)
+
+                # Title
+                t_lbl = Gtk.Label(label=item["title"])
+                t_lbl.add_css_class("title-4")
+                t_lbl.set_halign(Gtk.Align.START)
+                t_lbl.set_hexpand(True)
+                t_lbl.set_ellipsize(3)
+                row.append(t_lbl)
+
+                # Badge showing task count completed this month
+                c_count = item["completed_month"]
+                badge_text = f"{c_count} task{'s' if c_count != 1 else ''} completed this month"
+                badge = Gtk.Label(label=badge_text)
+                badge.add_css_class("caption")
+                badge.add_css_class("accent")
+                badge.set_halign(Gtk.Align.END)
+                row.append(badge)
+
+                card.append(row)
+
+                # Graphical Progress Bar area
+                bar = GoalProgressBarWidget(
+                    item["color"],
+                    item["completed_prior"],
+                    item["completed_month"],
+                    item["total_tasks"]
+                )
+                card.append(bar)
+
+                # Caption row showing exact task breakdown
+                tot_done = item["completed_prior"] + item["completed_month"]
+                pct = int((tot_done / max(1, item["total_tasks"])) * 100)
+                sub_txt = f"{tot_done}/{item['total_tasks']} total tasks ({pct}% overall progress)"
+                sub_lbl = Gtk.Label(label=sub_txt)
+                sub_lbl.add_css_class("caption")
+                sub_lbl.add_css_class("dim-label")
+                sub_lbl.set_halign(Gtk.Align.START)
+                card.append(sub_lbl)
+
+                self._progress_section.append(card)
 
     # ── drawing ───────────────────────────────────────────────────────────────
 
@@ -405,68 +701,68 @@ class GoalTrendWidget(Gtk.Box):
         return start
 
     def _draw_heatmap(self, area, cr, width, height):
-        cs = self._cell_size
-        cg = self._cell_gap
-        step = cs + cg
-
         lp = self._left_pad
-        tp = self._top_pad
-
-        # Dynamic cell size if canvas is wider
         available_w = width - lp - 4
-        cs_dyn = max(8, min(14, (available_w // self._num_weeks) - cg))
-        step = cs_dyn + cg
-        self._cell_size = cs_dyn
+        if available_w > 100:
+            step = available_w / self._num_weeks
+            cs = max(4.0, step - 2.0)
+            cg = step - cs
+        else:
+            cs = self._cell_size
+            cg = self._cell_gap
+            step = cs + cg
 
         start = self._week_start()
 
         fg = self._canvas.get_style_context().get_color()
 
-        # Weekday labels (Mon, Wed, Fri)
+        # Row weekday labels (Mon, Wed, Fri)
         cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.5)
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-        cr.set_font_size(8)
-        for row, label in [(0, "S"), (2, "T"), (4, "T"), (6, "S")]:
-            y_pos = tp + row * step + cs_dyn / 2 + 3
-            cr.move_to(2, y_pos)
-            cr.show_text(label)
+        cr.set_font_size(min(8, int(cs)))
+        day_labels = {1: "Mon", 3: "Wed", 5: "Fri"}
+        for r, lbl in day_labels.items():
+            cr.move_to(2, self._top_pad + r * step + cs - 2)
+            cr.show_text(lbl)
 
         # Draw cells
-        today = date.today()
+        today_date = date.today()
         for col in range(self._num_weeks):
             for row in range(7):
                 d = start + timedelta(days=col * 7 + row)
-                if d > today:
+                if d > today_date:
                     continue
-                count = self._count_for(d)
-                level = self._heat_level(count)
-                r_, g_, b_, a_ = self._HEAT_COLORS[level]
 
                 x0 = lp + col * step
-                y0 = tp + row * step
-                radius = 2.5
+                y0 = self._top_pad + row * step
 
-                # Rounded rectangle
-                cr.new_sub_path()
+                lvl = self._heat_level(self._count_for(d))
+                r_, g_, b_, a_ = self._HEAT_COLORS[lvl]
+
+                # Rounded rectangle cell
+                cs_dyn = cs
+                radius = max(1.0, min(2.0, cs_dyn * 0.2))
+                cr.new_path()
                 cr.arc(x0 + cs_dyn - radius, y0 + radius, radius, -math.pi/2, 0)
                 cr.arc(x0 + cs_dyn - radius, y0 + cs_dyn - radius, radius, 0, math.pi/2)
                 cr.arc(x0 + radius, y0 + cs_dyn - radius, radius, math.pi/2, math.pi)
                 cr.arc(x0 + radius, y0 + radius, radius, math.pi, 3*math.pi/2)
                 cr.close_path()
 
-                # Glow effect for high-activity days
-                if level >= 3:
-                    cr.set_source_rgba(r_, g_, b_, 0.25)
-                    cr.fill_preserve()
-                    cr.set_source_rgba(r_, g_, b_, a_)
-                    cr.fill()
+                cr.set_source_rgba(r_, g_, b_, a_)
+                cr.fill_preserve()
+
+                # Cell border
+                if lvl == 0:
+                    cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.08)
                 else:
-                    cr.set_source_rgba(r_, g_, b_, a_)
-                    cr.fill()
+                    cr.set_source_rgba(0, 0, 0, 0.25)
+                cr.set_line_width(0.8)
+                cr.stroke()
 
                 # Highlight today
-                if d == today:
-                    cr.new_sub_path()
+                if d == today_date:
+                    cr.new_path()
                     cr.arc(x0 + cs_dyn - radius, y0 + radius, radius, -math.pi/2, 0)
                     cr.arc(x0 + cs_dyn - radius, y0 + cs_dyn - radius, radius, 0, math.pi/2)
                     cr.arc(x0 + radius, y0 + cs_dyn - radius, radius, math.pi/2, math.pi)
@@ -478,8 +774,11 @@ class GoalTrendWidget(Gtk.Box):
 
     def _draw_month_labels(self, area, cr, width, height):
         lp = self._left_pad
-        cg = self._cell_gap
-        step = self._cell_size + cg
+        available_w = width - lp - 4
+        if available_w > 100:
+            step = available_w / self._num_weeks
+        else:
+            step = self._cell_size + self._cell_gap
         start = self._week_start()
 
         fg = self._canvas.get_style_context().get_color()
@@ -511,7 +810,14 @@ class GoalTrendWidget(Gtk.Box):
 
     def _cell_for_pos(self, x, y):
         lp = self._left_pad
-        step = self._cell_size + self._cell_gap
+        w = self._canvas.get_allocated_width()
+        if w <= 1:
+            w = 300
+        available_w = w - lp - 4
+        if available_w > 100:
+            step = available_w / self._num_weeks
+        else:
+            step = self._cell_size + self._cell_gap
         col = int((x - lp) // step)
         row = int((y - self._top_pad) // step)
         if 0 <= col < self._num_weeks and 0 <= row < 7:
@@ -535,10 +841,14 @@ class GoalTrendWidget(Gtk.Box):
         label = d.strftime("%a, %d %b %Y")
         if count == 0:
             tooltip.set_text(f"{label}\nNo completions")
-        elif count == 1:
-            tooltip.set_text(f"{label}\n1 completion 🎯")
         else:
-            tooltip.set_text(f"{label}\n{count} completions 🔥")
+            completed_list = self._daily_items.get(d, [])
+            if completed_list:
+                items_str = "\n".join(completed_list)
+                header = f"{label} ({count} completion{'s' if count > 1 else ''}):"
+                tooltip.set_text(f"{header}\n{items_str}")
+            else:
+                tooltip.set_text(f"{label}\n{count} completion{'s' if count > 1 else ''}")
         return True
 
 
@@ -575,9 +885,11 @@ class NotificationWidget(Adw.Bin):
 
         today = date.today()
         week_later = today + timedelta(days=7)
+        month_later = today + timedelta(days=30)
         
         overdue = []
-        upcoming = [] # List of (date, text) tuples
+        upcoming_week = []   # List of (date, text) tuples for next 7 days
+        upcoming_month = []  # List of (date, text) tuples for days 8-30
         any_completed_recently = False
         
         for g in self._goals:
@@ -590,7 +902,9 @@ class NotificationWidget(Adw.Bin):
                         if d < today:
                             overdue.append(f"Goal: {g['title']}")
                         elif d <= week_later:
-                            upcoming.append((d, f"Goal: {g['title']}"))
+                            upcoming_week.append((d, f"Goal: {g['title']}"))
+                        elif d <= month_later:
+                            upcoming_month.append((d, f"Goal: {g['title']}"))
                     except: pass
             else:
                 cd = g.get("completion_date")
@@ -615,7 +929,9 @@ class NotificationWidget(Adw.Bin):
                             if d < today:
                                 overdue.append(f"{label_prefix} {t['text']} ({g['title']}){recur_sym}")
                             elif d <= week_later:
-                                upcoming.append((d, f"{label_prefix} {t['text']} ({g['title']}){recur_sym}"))
+                                upcoming_week.append((d, f"{label_prefix} {t['text']} ({g['title']}){recur_sym}"))
+                            elif d <= month_later:
+                                upcoming_month.append((d, f"{label_prefix} {t['text']} ({g['title']}){recur_sym}"))
                         except: pass
                 else:
                     tcd = t.get("completion_date")
@@ -627,13 +943,11 @@ class NotificationWidget(Adw.Bin):
                         except: pass
 
                 # Project future recurring task instances
-                # Project future recurring task instances
                 if is_recurring:
                     try:
                         # Determine starting point for projection: task creation or today
                         created_str = t.get("created_at")
                         if created_str:
-                            # Handle potential ISO format with T separator or just date
                             if "T" in created_str:
                                 start_date = datetime.strptime(created_str.split("T")[0], "%Y-%m-%d").date()
                             else:
@@ -648,35 +962,30 @@ class NotificationWidget(Adw.Bin):
                                 task_end = datetime.strptime(t["end_date"], "%Y-%m-%d").date()
                             except: pass
 
-                        # Projection loop starting from created_at
-                        # We calculate all occurrences and only show those in the upcoming week
                         projection_date = start_date - timedelta(days=1)
                         found_count = 0
                         
                         while True:
                             next_date = self._calculate_next_date(projection_date, t.get("recurrence"), t.get("recurrence_days"))
                             
-                            # Break if logic fails or we passed both the task end and the week boundary
                             if not next_date: break
-                            if next_date > week_later: break
+                            if next_date > month_later: break
                             if task_end and next_date > task_end: break
 
                             # Only show occurrences from today onwards
                             if next_date >= today:
-                                if not t.get("completed") or next_date > today: # Show today's if incomplete
-                                    # Avoid duplicates
-                                    exists = any(u[0] == next_date and t['text'] in u[1] for u in upcoming)
+                                if not t.get("completed") or next_date > today:
+                                    target_list = upcoming_week if next_date <= week_later else upcoming_month
+                                    exists = any(u[0] == next_date and t['text'] in u[1] for u in (upcoming_week + upcoming_month))
                                     if not exists:
-                                        upcoming.append((next_date, f"{label_prefix} {t['text']} ({g['title']}){recur_sym}"))
+                                        target_list.append((next_date, f"{label_prefix} {t['text']} ({g['title']}){recur_sym}"))
                                         found_count += 1
                                         
-                                        # Limit daily as requested
                                         if t.get("recurrence") == "daily":
                                             break
                             
                             projection_date = next_date
-                            # Safety break to prevent infinite loops if logic has bugs
-                            if projection_date > week_later + timedelta(days=365): break
+                            if projection_date > month_later + timedelta(days=365): break
 
                     except Exception as e:
                         print(f"Error projecting recurring task: {e}")
@@ -687,13 +996,20 @@ class NotificationWidget(Adw.Bin):
             for item in overdue:
                 self._add_item(item, "error")
 
-        # Add "Upcoming this week" section
-        if upcoming:
-            upcoming.sort(key=lambda x: x[0]) # Sort by date
+        # Add "Upcoming Week" section
+        if upcoming_week:
+            upcoming_week.sort(key=lambda x: x[0])
             self._add_header("Upcoming Week", "accent")
-            for d, text in upcoming:
-                # Format: ddd - notification
+            for d, text in upcoming_week:
                 date_str = d.strftime("%a")
+                self._add_item(f"{date_str} - {text}")
+
+        # Add "Upcoming Month" section
+        if upcoming_month:
+            upcoming_month.sort(key=lambda x: x[0])
+            self._add_header("Upcoming Month", "accent")
+            for d, text in upcoming_month:
+                date_str = d.strftime("%b %d")
                 self._add_item(f"{date_str} - {text}")
 
         # Alert if no progress
@@ -701,7 +1017,7 @@ class NotificationWidget(Adw.Bin):
             self._add_header("Alert", "warning")
             self._add_item("No progress made in the last week!", "warning")
 
-        if not overdue and not upcoming and (any_completed_recently or not self._goals):
+        if not overdue and not upcoming_week and not upcoming_month and (any_completed_recently or not self._goals):
             empty_row = Adw.ActionRow()
             empty_row.set_title("No notifications")
             empty_row.add_css_class("dim-label")
