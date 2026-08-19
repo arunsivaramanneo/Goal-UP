@@ -13,6 +13,7 @@ from edit_dialog import EditGoalDialog
 from storage import load_tasks, save_tasks, export_to_ics, export_backup, import_backup, load_settings, save_settings
 from summary_widget import GoalPieChartsWidget, GoalTrendWidget, NotificationWidget, TimerWidget, CalendarWidget
 from timeline_widget import TimelineWidget
+from report_dialog import YearlyReportDialog
 from notification_manager import NotificationManager
 from desktop_widget import DesktopWidget
 from datetime import datetime, date
@@ -88,6 +89,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.data_button.set_tooltip_text("Data Management")
         self.data_button.set_menu_model(data_menu)
         header.pack_end(self.data_button)
+
+        # Yearly accomplishment slideshow
+        self.report_button = Gtk.Button()
+        self.report_button.set_icon_name("media-playback-start-symbolic")
+        self.report_button.set_tooltip_text("View Year in Review")
+        self.report_button.connect("clicked", self._on_report_clicked)
+        header.pack_end(self.report_button)
 
         # Theme Toggle
         self.theme_button = Gtk.Button()
@@ -325,6 +333,11 @@ class MainWindow(Adw.ApplicationWindow):
         about.set_transient_for(self)
         about.present()
 
+    def _on_report_clicked(self, button: Gtk.Button) -> None:
+        """Show a slideshow of this year's accomplishments."""
+        report = YearlyReportDialog(self._get_goals_data())
+        report.present(self)
+
     def _on_export_ics_clicked(self, action: Gio.SimpleAction, parameter: GLib.Variant = None) -> None:
         """Handle export to ICS button click."""
         dialog = Gtk.FileDialog(title="Export to Calendar")
@@ -459,8 +472,13 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         current_color = self.color_button.get_rgba().to_string()
-        mandatory_end_date = date.today().isoformat()
-        self._add_goal(text, "", False, [], None, end_date=mandatory_end_date, color=current_color)
+        dialog = EditGoalDialog(text, color=current_color)
+        dialog.connect("save", self._on_new_goal_save)
+        dialog.present(self)
+
+    def _on_new_goal_save(self, dialog: EditGoalDialog, title: str, description: str, end_date: str, parent_id: str, color: str, end_time: str, completion_date: str) -> None:
+        """Add a goal created through the quick-add field."""
+        self._add_goal(title, description, False, [], None, end_date=end_date, parent_id=parent_id, color=color, end_time=end_time, recurrence="none", recurrence_days="")
         self.goal_entry.set_text("")
         self._set_random_color()
         self._reorder_goals()
@@ -542,11 +560,8 @@ class MainWindow(Adw.ApplicationWindow):
             
         goals = load_tasks()
         for goal in goals:
-            g_end_date = goal.get("end_date") or date.today().isoformat()
+            g_end_date = goal.get("end_date", "")
             g_tasks = goal.get("tasks", [])
-            for t in g_tasks:
-                if not t.get("end_date"):
-                    t["end_date"] = g_end_date
             self._add_goal(
                 goal.get("title", goal.get("text", "")),  # Backward compat
                 goal.get("description", ""),

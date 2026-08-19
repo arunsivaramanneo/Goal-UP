@@ -318,6 +318,7 @@ class GoalTrendWidget(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._goals = []
         self._daily_counts = {}   # date → int completions
+        self._daily_colors = {}   # date → goal color for the day's completions
         self._tooltip_text = ""
 
         # ── Streak stats row ────────────────────────────────────────────────
@@ -453,8 +454,10 @@ class GoalTrendWidget(Gtk.Box):
     def _rebuild_daily_counts(self):
         counts = defaultdict(int)
         items = defaultdict(list)
+        colors = defaultdict(list)
         for g in self._goals:
             g_title = g.get("title", g.get("text", "Untitled Goal"))
+            goal_color = g.get("color") or "#3584e4"
             if g.get("completed"):
                 ds = (g.get("completion_date") or g.get("end_date") or "")[:10]
                 d = None
@@ -466,6 +469,7 @@ class GoalTrendWidget(Gtk.Box):
                 if not d:
                     d = date.today()
                 counts[d] += 1
+                colors[d].append(goal_color)
                 items[d].append(f"🎯 Goal: {g_title}")
 
             for t in g.get("tasks", []):
@@ -481,8 +485,10 @@ class GoalTrendWidget(Gtk.Box):
                     if not d:
                         d = date.today()
                     counts[d] += 1
+                    colors[d].append(goal_color)
                     items[d].append(f"✅ Task: {t_text} ({g_title})")
         self._daily_counts = dict(counts)
+        self._daily_colors = dict(colors)
         self._daily_items = dict(items)
 
     def _count_for(self, d):
@@ -494,6 +500,17 @@ class GoalTrendWidget(Gtk.Box):
         if count <= 3: return 2
         if count <= 6: return 3
         return 4
+
+    def _color_for_day(self, d, level):
+        """Use the linked goal color while retaining completion intensity."""
+        if level == 0:
+            return self._HEAT_COLORS[0]
+
+        color = Gdk.RGBA()
+        if not color.parse(self._daily_colors.get(d, ["#3584e4"])[0]):
+            color.parse("#3584e4")
+        alpha = (0.60, 0.78, 0.90, 1.00)[level - 1]
+        return color.red, color.green, color.blue, alpha
 
     def _calc_streaks(self):
         """Calculate Current Month completions and Best Month max completions."""
@@ -737,7 +754,7 @@ class GoalTrendWidget(Gtk.Box):
                 y0 = self._top_pad + row * step
 
                 lvl = self._heat_level(self._count_for(d))
-                r_, g_, b_, a_ = self._HEAT_COLORS[lvl]
+                r_, g_, b_, a_ = self._color_for_day(d, lvl)
 
                 # Rounded rectangle cell
                 cs_dyn = cs

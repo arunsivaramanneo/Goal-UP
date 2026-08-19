@@ -359,7 +359,7 @@ class EditGoalDialog(Adw.Dialog):
         if not end_date:
             dialog = Adw.MessageDialog(
                 heading="Missing End Date",
-                body="Dreams without an end date will remain Dreams :)"
+                body="Goals without an end date will remain Dreams"
             )
             dialog.add_response("ok", "OK")
             dialog.set_default_response("ok")
@@ -747,7 +747,7 @@ class EditTaskDialog(Adw.Dialog):
         if not end_date:
             dialog = Adw.MessageDialog(
                 heading="Missing End Date",
-                body="Dreams without an end date will remain Dreams :)"
+                body="Goals without an end date will remain Dreams"
             )
             dialog.add_response("ok", "OK")
             dialog.set_default_response("ok")

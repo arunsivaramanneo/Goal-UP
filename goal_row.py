@@ -414,7 +414,8 @@ class GoalRow(Adw.ExpanderRow):
             # For now, just add them as flat, window.py will handle the full hierarchy.
             for task in tasks:
                 self._add_subtask_from_dict(task)
-        
+
+        self._extend_end_date_to_tasks()
         self.reorder_tasks()
 
         self._update_style()
@@ -533,6 +534,7 @@ class GoalRow(Adw.ExpanderRow):
         self._end_time = end_time
         self._parent_id = parent_id
         self._completion_date = completion_date
+        self._extend_end_date_to_tasks()
         
         if self._completion_date and not self._completed:
             self.check_button.set_active(True)
@@ -760,6 +762,7 @@ class GoalRow(Adw.ExpanderRow):
 
     def _on_subtask_changed(self, row: SubTaskRow, text: str) -> None:
         """Handle sub-task change."""
+        self._extend_end_date_to_tasks()
         self.emit("goal-changed")
 
     def _on_add_task(self, widget: Gtk.Widget) -> None:
@@ -767,12 +770,45 @@ class GoalRow(Adw.ExpanderRow):
         text = self.task_entry.get_text().strip()
         if not text:
             return
-        mandatory_end_date = self._end_date or date.today().isoformat()
-        self._add_subtask(text, False, end_date=mandatory_end_date)
+        possible_parents = [(row.id, row.task_text) for row in self._subtask_rows]
+        dialog = EditTaskDialog(text, possible_parents=possible_parents)
+        dialog.connect("save", self._on_new_task_save)
+        root = self.get_root()
+        if root:
+            dialog.present(root)
+
+    def _on_new_task_save(self, dialog: EditTaskDialog, text: str, end_date: str, parent_id: str, end_time: str, completion_date: str, recurrence: str, recurrence_days: str) -> None:
+        """Add a task created through the quick-add field."""
+        self._add_subtask(text, False, end_date=end_date, parent_id=parent_id, end_time=end_time, recurrence=recurrence, recurrence_days=recurrence_days)
         self.task_entry.set_text("")
+        self._extend_end_date_to_tasks()
         self.reorder_tasks()
         self._update_progress()
         self.emit("goal-changed")
+
+    def _extend_end_date_to_tasks(self) -> None:
+        """Keep the goal end date at least as late as every task date."""
+        task_dates = []
+        for task in self._subtask_rows:
+            if not task.end_date:
+                continue
+            try:
+                task_dates.append(datetime.strptime(task.end_date, "%Y-%m-%d").date())
+            except (TypeError, ValueError):
+                continue
+
+        if not task_dates:
+            return
+
+        latest_task_date = max(task_dates)
+        try:
+            goal_date = datetime.strptime(self._end_date, "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            goal_date = None
+
+        if goal_date is None or latest_task_date > goal_date:
+            self._end_date = latest_task_date.isoformat()
+            self._update_days_remaining()
 
     def _on_subtask_deleted(self, subtask_row: SubTaskRow, row: SubTaskRow) -> None:
         """Handle sub-task deletion."""
