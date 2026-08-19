@@ -18,7 +18,7 @@ mkdir -p "$EXTENSION_DIR"
 
 # Copy source files
 echo "Copying application files..."
-cp main.py window.py goal_row.py storage.py edit_dialog.py summary_widget.py timeline_widget.py trend_widget.py notification_manager.py desktop_widget.py gtk_dark.css "$INSTALL_DIR/"
+cp main.py window.py goal_row.py storage.py edit_dialog.py report_dialog.py summary_widget.py timeline_widget.py trend_widget.py notification_manager.py desktop_widget.py gtk_dark.css "$INSTALL_DIR/"
 
 # Copy icon
 echo "Installing icon..."
